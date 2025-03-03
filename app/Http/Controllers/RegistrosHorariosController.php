@@ -191,11 +191,11 @@ class RegistrosHorariosController extends Controller
                 })
                 ->get();
         } else {
-            $registros_horarios = RegistrosHorarios::all();
+            $registros_horarios = RegistrosHorarios::orderBy('id')->get();
         }
         //dd($registros_horarios);
         $perPage = $request->input('perPage', 10);
-        $registros_horarios = Mostrar::paginate($perPage); // Muestra 10 registros por página
+        $registros_horarios = Mostrar::orderBy('id', 'desc')->paginate($perPage); // Muestra 10 registros por página
         return view('mostrar_registros.index', compact('registros_horarios'));
     }
 
@@ -203,11 +203,11 @@ class RegistrosHorariosController extends Controller
     public function createNew()
     {
         $empleados = Empleado::all();
-        $registros_horarios = RegistrosHorarios::all();
+        $registros_horarios = RegistrosHorarios::orderBy('id')->get();
         return view('registro_horario.formCrear', compact('empleados', 'registros_horarios'));
     }
 
-    // Mostrar el formulario para crear un nuevo registro de horario
+    // Mostrar el formulario para mostrar un registro de horario
     public function create()
     {
         $empleados = Empleado::all(); // Obtener todos los empleados
