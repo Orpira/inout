@@ -159,7 +159,10 @@ class RegistrosHorariosController extends Controller
         }
         // Calcula horas extras y valida los valores
         $this->calculoExtras->calculateExtraHours($empleado->id, $turnos->id);
-        return response()->json(['mensaje' => 'Salida registrada con éxito', 'registro' => $registro_horario]);
+        return response()->json([
+            'mensaje' =>  $empleado->nombre . ' ' . $empleado->apellido . '. Salida registrada con éxito. Hora de Salida: ' . date('H:i:s', strtotime(now())),
+            'registro' => $registro_horario
+        ]);
     }
 
     // Notificar registros pendientes

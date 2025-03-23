@@ -16,7 +16,6 @@
                     <th>Nombre</th>
                     <th>Apellidos</th>
                     <th>Identificación</th>
-                    <th>Turno</th>
                     <th>Cargo</th>
                     <th>Salario</th>
                     <th>Horas x Semana</th>
@@ -30,7 +29,6 @@
                     <td>{{ $empleado->nombre }}</td>
                     <td>{{ $empleado->apellido }}</td>
                     <td>{{ $empleado->identificacion }}</td>
-                    <td>{{ $empleado->turnoid }}</td>
                     <td>{{ $empleado->cargo }}</td>
                     <td>{{ $empleado->salario }}</td>
                     <td>{{ $empleado->horasxsemana }}</td>

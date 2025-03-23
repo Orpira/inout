@@ -26,10 +26,6 @@
                 <input type="text" name="identificacion" id="identificacion" class="form-control" value="{{ $empleado->identificacion ?? '' }}" required>
             </div>
             <div class="form-group">
-                <label for="turnoid">Turno</label>
-                <input type="text" name="turnoid" id="turnoid" class="form-control" value="{{ $empleado->turnoid ?? '' }}">
-            </div>
-            <div class="form-group">
                 <label for="cargo">Cargo</label>
                 <input type="text" name="cargo" id="cargo" class="form-control" value="{{ $empleado->cargo ?? '' }}">
             </div>

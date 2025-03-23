@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('registros_horarios', function (Blueprint $table) {
+        Schema::table('registro_horario', function (Blueprint $table) {
             //
         });
     }
@@ -21,7 +21,7 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('registros_horarios', function (Blueprint $table) {
+        Schema::table('registro_horario', function (Blueprint $table) {
             //
         });
     }

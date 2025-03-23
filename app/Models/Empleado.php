@@ -11,5 +11,5 @@ class Empleado extends Model
     use HasFactory;
 
     protected $table = 'empleados';
-    protected $fillable = ['nombre', 'apellido', 'identificacion', 'turnoid', 'cargo', 'salario', 'horasxsemana'];
+    protected $fillable = ['nombre', 'apellido', 'identificacion', 'cargo', 'salario', 'horasxsemana'];
 }

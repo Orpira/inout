@@ -11,7 +11,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('registros', function (Blueprint $table) {
+        Schema::table('registros_horarios', function (Blueprint $table) {
             $table->timestamps(); // Agrega las columnas `created_at` y `updated_at`
         });
     }
@@ -21,7 +21,7 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('registros', function (Blueprint $table) {
+        Schema::table('registros_horarios', function (Blueprint $table) {
             $table->dropTimestamps(); // Elimina las columnas en caso de rollback
         });
     }
