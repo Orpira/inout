@@ -6,7 +6,7 @@
         "dev": "vite"
     },
     "devDependencies": {
-        "@babel/plugin-proposal-decorators": "^legacy: true",
+        "@babel/plugin-proposal-decorators": "^7.22.5",
         "@tailwindcss/forms": "^0.5.2",
         "alpinejs": "^3.4.2",
         "autoprefixer": "^10.4.2",
@@ -15,11 +15,13 @@
         "laravel-vite-plugin": "^1.0",
         "postcss": "^8.4.31",
         "tailwindcss": "^3.1.0",
+        "typescript": "^5.7.3",
         "vite": "^6.0"
     },
     "dependencies": {
         "jquery": "^3.7.1",
         "jquery-ui": "^1.14.1",
-        "popper.js": "^1.16.1"
+        "popper.js": "^1.16.1",
+        "pg": "^8.11.0"
     }
 }

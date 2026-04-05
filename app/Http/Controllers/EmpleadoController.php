@@ -51,6 +51,29 @@ class EmpleadoController extends Controller
     {
         return view('empleados.registros');
     }
+    
+    /**
+     * Busca un empleado por su código de identificación.
+     *
+     * @param  string  $codigo
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function buscarPorCodigo($codigo)
+    {
+        $empleado = Empleado::where('identificacion', $codigo)->first();
+        
+        if (!$empleado) {
+            return response()->json(['error' => 'Empleado no encontrado'], 404);
+        }
+        
+        return response()->json([
+            'id' => $empleado->id,
+            'nombre' => $empleado->nombre,
+            'apellido' => $empleado->apellido,
+            'identificacion' => $empleado->identificacion,
+            'cargo' => $empleado->cargo
+        ]);
+    }
 
     /**
      * Update the specified resource in storage.

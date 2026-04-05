@@ -1,61 +1,48 @@
-@extends('adminlte::page')
+@extends('layouts.crud')
 
-@section('title', 'Formulario Entradas y Salidas')
+@section('title', 'Crear Registro')
+@section('pageTitle', 'Nuevo Registro de Asistencia')
 
 @section('content')
-<div class="card">
-    <div class="card-header">
-        <h3 class="card-title">Crear Registro</h3>
+<form action="{{ route('registro_horario.store') }}" method="POST" class="grid gap-4 md:grid-cols-2">
+    @csrf
+
+    <div>
+        <label for="empleado_id" class="app-label">Empleado</label>
+        <select name="empleado_id" id="empleado_id" class="app-input" required>
+            <option value="">Seleccionar...</option>
+            @foreach($empleados as $empleado)
+            <option value="{{ $empleado->id }}">{{ $empleado->nombre }} {{ $empleado->apellido }}</option>
+            @endforeach
+        </select>
     </div>
-    <div class="card-body">
-        <form action="{{ route('registro_horario.store') }}" method="POST">
-            @csrf
-            @if(isset($registros_horarios))
-            @method('PUT')
-            @endif
 
-            <div class="col-md-6">
-                <label for="empleado_id" class="form-label">Empleado:</label>
-                <select name="empleado_id" id="empleado_id" class="form-control">
-                    @foreach($empleados as $empleado)
-                    <option value="{{ $empleado->id }}" {{ (isset($registros_horarios) && $registros_horarios->empleado_id == $empleado->id) ? 'selected' : '' }} required>
-                        {{ $empleado->nombre }} {{ $empleado->apellido }}
-                    </option>
-                    @endforeach
-                </select>
-            </div>
-
-            <div class="form-group">
-
-                <div class="row">
-                    <div class="col-md-6">
-                        <label for="entrada">Entrada</label>
-                        <input type="datetime-local" name="entrada" id="entrada" class="form-control" value="{{ $registros_horarios->entrada ?? '' }} " required>
-                    </div>
-                    <div class="col-md-6">
-                        <label for="salida">Salida</label>
-                        <input type="datetime-local" name="salida" id="salida" class="form-control" value="{{ $registros_horarios->salida ?? '' }}" required>
-                    </div>
-                </div>
-
-            </div>
-
-            <div class="form-group">
-                <label for="estado">Estado</label>
-                <select name="estado" id="estado" class="form-control">
-                    <option value="FINALIZADO">FINALIZADO</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="novedad">Novedades:</label>
-                <textarea name="novedad" id="novedad" class="form-control" rows="5" maxlength="1000">{{ old('novedad', $registros_horarios->novedad ?? '') }}</textarea>
-            </div>
-
-            <!-- Agregar los demás campos -->
-
-            <button type="submit" class="btn btn-primary">Crear</button>
-            <a href="{{ route('registro_horario.index') }}" class="btn btn-secondary">Cancelar</a>
-        </form>
+    <div>
+        <label for="estado" class="app-label">Estado</label>
+        <select name="estado" id="estado" class="app-input">
+            <option value="FINALIZADO">FINALIZADO</option>
+            <option value="PENDIENTE">PENDIENTE</option>
+        </select>
     </div>
-</div>
+
+    <div>
+        <label for="entrada" class="app-label">Entrada</label>
+        <input type="datetime-local" name="entrada" id="entrada" class="app-input" required>
+    </div>
+
+    <div>
+        <label for="salida" class="app-label">Salida</label>
+        <input type="datetime-local" name="salida" id="salida" class="app-input" required>
+    </div>
+
+    <div class="md:col-span-2">
+        <label for="novedad" class="app-label">Novedades</label>
+        <textarea name="novedad" id="novedad" class="app-input" rows="4" maxlength="1000"></textarea>
+    </div>
+
+    <div class="md:col-span-2 flex justify-end gap-2 pt-2">
+        <a href="{{ route('registro_horario.index') }}" class="btn-secondary">Cancelar</a>
+        <button type="submit" class="btn-primary">Crear Registro</button>
+    </div>
+</form>
 @endsection

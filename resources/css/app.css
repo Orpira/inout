@@ -1,3 +1,131 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+    :root {
+        --bg: #f3f6f8;
+        --surface: #ffffff;
+        --surface-soft: #edf3f7;
+        --border: #d7e2ea;
+        --text: #0f2231;
+        --muted: #4f6576;
+        --brand: #006a6f;
+        --brand-strong: #004f55;
+        --accent: #f7b34b;
+        --danger: #bb1f3f;
+        --ok: #1e8158;
+        --shadow: 0 12px 34px rgba(15, 34, 49, 0.11);
+    }
+
+    body {
+        font-family: "Source Sans 3", sans-serif;
+        color: var(--text);
+        background:
+            radial-gradient(
+                1200px 500px at 12% -20%,
+                rgba(0, 106, 111, 0.11),
+                transparent 60%
+            ),
+            radial-gradient(
+                1000px 420px at 88% 0%,
+                rgba(247, 179, 75, 0.12),
+                transparent 60%
+            ),
+            var(--bg);
+        min-height: 100vh;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6 {
+        font-family: "Sora", sans-serif;
+        letter-spacing: -0.02em;
+        color: var(--text);
+    }
+}
+
+@layer components {
+    .app-shell {
+        @apply min-h-screen;
+    }
+
+    .surface-panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        @apply rounded-2xl;
+    }
+
+    .surface-panel-soft {
+        background: var(--surface-soft);
+        border: 1px solid var(--border);
+        @apply rounded-2xl;
+    }
+
+    .app-input {
+        border: 1px solid var(--border);
+        background: #fdfefe;
+        color: var(--text);
+        @apply rounded-xl px-4 py-2.5 w-full;
+    }
+
+    .app-input:focus {
+        outline: none;
+        border-color: color-mix(in srgb, var(--brand) 70%, white);
+        box-shadow: 0 0 0 4px rgba(0, 106, 111, 0.12);
+    }
+
+    .app-label {
+        color: var(--muted);
+        @apply block text-sm font-semibold mb-1;
+    }
+
+    .btn-primary {
+        background: linear-gradient(135deg, var(--brand), var(--brand-strong));
+        color: #f8fefe;
+        border: 1px solid transparent;
+        @apply inline-flex items-center justify-center px-4 py-2.5 rounded-xl text-sm font-semibold transition;
+    }
+
+    .btn-primary:hover {
+        filter: brightness(1.05);
+        transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+        background: #ffffff;
+        color: var(--text);
+        border: 1px solid var(--border);
+        @apply inline-flex items-center justify-center px-4 py-2.5 rounded-xl text-sm font-semibold transition;
+    }
+
+    .btn-secondary:hover {
+        background: #f8fbfd;
+    }
+
+    .btn-danger {
+        background: var(--danger);
+        color: #fff;
+        @apply inline-flex items-center justify-center px-4 py-2.5 rounded-xl text-sm font-semibold transition;
+    }
+
+    .fade-rise {
+        animation: fade-rise 0.45s ease-out both;
+    }
+}
+
+@keyframes fade-rise {
+    from {
+        opacity: 0;
+        transform: translateY(14px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

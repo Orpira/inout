@@ -12,9 +12,12 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('empleados', function (Blueprint $table) {
-            $table->decimal('salario', 10, 2);
-            $table->integer('horasxsemana')->default(44); // Jornada semanal por defecto
-
+            if (!Schema::hasColumn('empleados', 'salario')) {
+                $table->decimal('salario', 10, 2)->default(0);
+            }
+            if (!Schema::hasColumn('empleados', 'horasxsemana')) {
+                $table->integer('horasxsemana')->default(44); // Jornada semanal por defecto
+            }
         });
     }
 

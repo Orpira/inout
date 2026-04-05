@@ -62,8 +62,6 @@ class MostrarController extends Controller
     {
         $registros_horarios = Mostrar::find($id);
 
-        //dd($registros_horarios);
-
         if (!$registros_horarios) {
             return response()->json(['error' => 'Registro no encontrado'], 404);
         }
@@ -76,8 +74,6 @@ class MostrarController extends Controller
         // Actualizar los demás campos
         $registros_horarios->update($request->except('estado'));
 
-        //$registros_horarios->update($request->all());
-        //dd($registros_horarios);
         return redirect()->route('registro_horario.index')->with('success', 'Registro actualizado correctamente.');
     }
 

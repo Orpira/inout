@@ -1,46 +1,48 @@
-@extends('adminlte::page')
+@extends('layouts.crud')
 
-@section('title', 'Formulario Empleados')
+@section('title', 'Formulario Empleado')
+@section('pageTitle', isset($empleado) ? 'Editar Empleado' : 'Crear Empleado')
 
 @section('content')
-<div class="card">
-    <div class="card-header">
-        <h3 class="card-title">{{ isset($empleado) ? 'Editar Empleado' : 'Crear Empleado' }}</h3>
-    </div>
-    <div class="card-body">
-        <form action="{{ isset($empleado) ? route('empleado.update', $empleado) : route('empleado.store') }}" method="POST">
-            @csrf
-            @if(isset($empleado))
-            @method('PUT')
-            @endif
-            <div class="form-group">
-                <label for="nombre">Nombre</label>
-                <input type="text" name="nombre" id="nombre" class="form-control" value="{{ $empleado->nombre ?? '' }}" required>
-            </div>
-            <div class="form-group">
-                <label for="apellido">Apellidos</label>
-                <input type="text" name="apellido" id="apellido" class="form-control" value="{{ $empleado->apellido ?? '' }}" required>
-            </div>
-            <div class="form-group">
-                <label for="identificacion">Identificación</label>
-                <input type="text" name="identificacion" id="identificacion" class="form-control" value="{{ $empleado->identificacion ?? '' }}" required>
-            </div>
-            <div class="form-group">
-                <label for="cargo">Cargo</label>
-                <input type="text" name="cargo" id="cargo" class="form-control" value="{{ $empleado->cargo ?? '' }}">
-            </div>
-            <div class="form-group">
-                <label for="salaraio">Salario</label>
-                <input type="text" name="salario" id="salario" class="form-control" value="{{ $empleado->salario ?? '' }}">
-            </div>
-            <div class="form-group">
-                <label for="horasxsemana">Horas Semanales</label>
-                <input type="text" name="horasxsemana" id="horasxsemana" class="form-control" value="{{ $empleado->horasxsemana ?? '' }}">
-            </div>
+<form action="{{ isset($empleado) ? route('empleado.update', $empleado) : route('empleado.store') }}" method="POST" class="grid gap-4 md:grid-cols-2">
+    @csrf
+    @if(isset($empleado))
+    @method('PUT')
+    @endif
 
-            <!-- Agregar los demás campos -->
-            <button type="submit" class="btn btn-primary">{{ isset($empleado) ? 'Actualizar' : 'Crear' }}</button>
-        </form>
+    <div>
+        <label for="nombre" class="app-label">Nombre</label>
+        <input type="text" name="nombre" id="nombre" class="app-input" value="{{ old('nombre', $empleado->nombre ?? '') }}" required>
     </div>
-</div>
+
+    <div>
+        <label for="apellido" class="app-label">Apellidos</label>
+        <input type="text" name="apellido" id="apellido" class="app-input" value="{{ old('apellido', $empleado->apellido ?? '') }}" required>
+    </div>
+
+    <div>
+        <label for="identificacion" class="app-label">Identificación</label>
+        <input type="text" name="identificacion" id="identificacion" class="app-input" value="{{ old('identificacion', $empleado->identificacion ?? '') }}" required>
+    </div>
+
+    <div>
+        <label for="cargo" class="app-label">Cargo</label>
+        <input type="text" name="cargo" id="cargo" class="app-input" value="{{ old('cargo', $empleado->cargo ?? '') }}">
+    </div>
+
+    <div>
+        <label for="salario" class="app-label">Salario</label>
+        <input type="text" name="salario" id="salario" class="app-input" value="{{ old('salario', $empleado->salario ?? '') }}">
+    </div>
+
+    <div>
+        <label for="horasxsemana" class="app-label">Horas Semanales</label>
+        <input type="text" name="horasxsemana" id="horasxsemana" class="app-input" value="{{ old('horasxsemana', $empleado->horasxsemana ?? '') }}">
+    </div>
+
+    <div class="md:col-span-2 flex justify-end gap-2 pt-2">
+        <a href="{{ route('empleado.index') }}" class="btn-secondary">Cancelar</a>
+        <button type="submit" class="btn-primary">{{ isset($empleado) ? 'Actualizar' : 'Crear' }}</button>
+    </div>
+</form>
 @endsection
