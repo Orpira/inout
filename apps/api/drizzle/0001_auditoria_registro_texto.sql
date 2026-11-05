@@ -1,0 +1,1 @@
+ALTER TABLE "auditoria" ALTER COLUMN "registro_id" SET DATA TYPE text;

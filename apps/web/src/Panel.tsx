@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
-import { ErrorApi, type Sesion, api } from './api';
+import { type Sesion, api } from './api';
+import { Empleados } from './panel/Empleados';
+import { Festivos } from './panel/Festivos';
+import { Liquidacion } from './panel/Liquidacion';
+import { Marcaciones, Revision } from './panel/Marcaciones';
+import { Usuarios } from './panel/Usuarios';
 
 function Login() {
   const qc = useQueryClient();
@@ -31,31 +36,77 @@ export function Panel() {
   const qc = useQueryClient();
   const sesion = useQuery({
     queryKey: ['sesion'],
-    queryFn: () => api<Sesion>('/auth/yo'),
-    retry: (n, err) => !(err instanceof ErrorApi && err.status === 401) && n < 2,
+    queryFn: async () => (await api<{ sesion: Sesion | null }>('/auth/yo')).sesion,
   });
   const salir = useMutation({
     mutationFn: () => api('/auth/logout', { method: 'POST' }),
-    onSuccess: () => qc.setQueryData(['sesion'], null),
+    onSuccess: () => {
+      qc.clear(); // no dejar datos de la sesión anterior en caché
+      qc.setQueryData(['sesion'], null);
+    },
   });
 
   if (sesion.isPending) return null;
   if (!sesion.data) return <Login />;
+  return <Principal sesion={sesion.data} onSalir={() => salir.mutate()} />;
+}
+
+const PESTANAS = [
+  { id: 'revision', titulo: 'Revisión', soloAdmin: false },
+  { id: 'marcaciones', titulo: 'Marcaciones', soloAdmin: false },
+  { id: 'liquidacion', titulo: 'Liquidación', soloAdmin: false },
+  { id: 'empleados', titulo: 'Empleados', soloAdmin: true },
+  { id: 'festivos', titulo: 'Festivos', soloAdmin: false },
+  { id: 'usuarios', titulo: 'Usuarios', soloAdmin: true },
+] as const;
+type IdPestana = (typeof PESTANAS)[number]['id'];
+
+function Principal({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void }) {
+  const esAdmin = sesion.rol === 'ADMIN';
+  const visibles = PESTANAS.filter((p) => esAdmin || !p.soloAdmin);
+  // La pestaña va en el hash para que sobreviva a una recarga.
+  const inicial = visibles.find((p) => `#${p.id}` === window.location.hash)?.id ?? 'revision';
+  const [activa, setActiva] = useState<IdPestana>(inicial);
+  const ir = (id: IdPestana) => {
+    setActiva(id);
+    history.replaceState(null, '', `#${id}`);
+  };
+  const revision = useQuery({ queryKey: ['revision'], queryFn: () => api<unknown[]>('/marcaciones/revision'), refetchInterval: 60_000 });
 
   return (
-    <div className="mx-auto max-w-5xl p-6">
-      <header className="mb-6 flex items-center justify-between">
+    <div className="mx-auto max-w-7xl p-6">
+      <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-semibold">InOut · Supervisión</h1>
         <div className="flex items-center gap-3 text-sm">
+          <span className="text-slate-500">Hora de Colombia</span>
           <span>
-            {sesion.data.nombre} ({sesion.data.rol})
+            {sesion.nombre} · {esAdmin ? 'Administrador' : 'Supervisor'}
           </span>
-          <button className="rounded border px-3 py-1" onClick={() => salir.mutate()}>
+          <button className="rounded border px-3 py-1" onClick={onSalir}>
             Salir
           </button>
         </div>
       </header>
-      <p className="text-slate-500">Pendiente: marcaciones en revisión, correcciones con motivo, liquidación y calendario de festivos.</p>
+      <nav className="mb-6 flex gap-1 border-b">
+        {visibles.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => ir(p.id)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm ${activa === p.id ? 'border-slate-900 font-medium' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          >
+            {p.titulo}
+            {p.id === 'revision' && !!revision.data?.length && (
+              <span className="ml-2 rounded-full bg-amber-500 px-2 py-0.5 text-xs text-white">{revision.data.length}</span>
+            )}
+          </button>
+        ))}
+      </nav>
+      {activa === 'revision' && <Revision />}
+      {activa === 'marcaciones' && <Marcaciones />}
+      {activa === 'liquidacion' && <Liquidacion />}
+      {activa === 'empleados' && esAdmin && <Empleados />}
+      {activa === 'festivos' && <Festivos puedeEditar={esAdmin} />}
+      {activa === 'usuarios' && esAdmin && <Usuarios />}
     </div>
   );
 }

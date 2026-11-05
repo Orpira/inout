@@ -3,15 +3,21 @@ import { resolve } from 'node:path';
 import cookie from '@fastify/cookie';
 import jwt from '@fastify/jwt';
 import fastifyStatic from '@fastify/static';
-import { ZONA_HORARIA, fechaLocal, festivosDelAnio, horaLocal } from '@inout/core';
+import { ZONA_HORARIA, fechaLocal, horaLocal } from '@inout/core';
 import { eq } from 'drizzle-orm';
 import Fastify from 'fastify';
 import { z } from 'zod';
-import { COOKIE_SESION, requiereRol, verificarClave } from './auth.js';
+import { COOKIE_SESION, type Sesion, verificarClave } from './auth.js';
 import { config } from './config.js';
 import type { Db } from './db/index.js';
-import { ajustesFestivos, usuarios } from './db/schema.js';
+import { usuarios } from './db/schema.js';
 import { marcar } from './marcaciones.js';
+import { ErrorHttp } from './rutas/comun.js';
+import { rutasEmpleados } from './rutas/empleados.js';
+import { rutasFestivos } from './rutas/festivos.js';
+import { rutasLiquidacion } from './rutas/liquidacion.js';
+import { rutasMarcaciones } from './rutas/marcaciones.js';
+import { rutasUsuarios } from './rutas/usuarios.js';
 
 const DURACION_SESION_S = 12 * 3600;
 
@@ -23,6 +29,14 @@ export async function crearApp(db: Db) {
     secret: config.JWT_SECRET,
     cookie: { cookieName: COOKIE_SESION, signed: false },
     sign: { expiresIn: DURACION_SESION_S },
+  });
+
+  app.setErrorHandler((err, req, reply) => {
+    if (err instanceof ErrorHttp) return reply.code(err.status).send({ error: err.message });
+    const status = (err as { statusCode?: number }).statusCode;
+    if (status && status < 500) return reply.code(status).send({ error: (err as Error).message });
+    req.log.error(err);
+    return reply.code(500).send({ error: 'Error interno' });
   });
 
   app.get('/api/salud', async () => {
@@ -67,15 +81,23 @@ export async function crearApp(db: Db) {
 
   app.post('/api/auth/logout', async (_req, reply) => reply.clearCookie(COOKIE_SESION, { path: '/' }).send({ ok: true }));
 
-  app.get('/api/auth/yo', { preHandler: requiereRol() }, async (req) => req.user);
-
-  // --- Calendario ---
-  app.get('/api/festivos/:anio', { preHandler: requiereRol() }, async (req, reply) => {
-    const p = z.object({ anio: z.coerce.number().int().min(2000).max(2100) }).safeParse(req.params);
-    if (!p.success) return reply.code(400).send({ error: 'Año inválido' });
-    const ajustes = await db.select().from(ajustesFestivos);
-    return festivosDelAnio(p.data.anio, ajustes.map((a) => ({ ...a, nombre: a.nombre ?? undefined })));
+  // Consulta de sesión: sin sesión responde 200 con null (no es un error, solo
+  // indica al panel que muestre el login).
+  app.get('/api/auth/yo', async (req) => {
+    try {
+      const { id, rol, nombre } = await req.jwtVerify<Sesion>({ onlyCookie: true });
+      return { sesion: { id, rol, nombre } };
+    } catch {
+      return { sesion: null };
+    }
   });
+
+  // --- Panel ---
+  rutasEmpleados(app, db);
+  rutasMarcaciones(app, db);
+  rutasLiquidacion(app, db);
+  rutasFestivos(app, db);
+  rutasUsuarios(app, db);
 
   // --- Frontend (producción: un solo proceso y origen) ---
   const webDist = config.WEB_DIST ? resolve(config.WEB_DIST) : undefined;

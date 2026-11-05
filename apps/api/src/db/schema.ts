@@ -71,7 +71,8 @@ export const marcaciones = pgTable(
 export const auditoria = pgTable('auditoria', {
   id: serial('id').primaryKey(),
   tabla: text('tabla').notNull(),
-  registroId: integer('registro_id').notNull(),
+  /** Id del registro afectado (texto: hay tablas con clave fecha). */
+  registroId: text('registro_id').notNull(),
   /** null = acción del sistema (p. ej. paso automático a REVISION). */
   usuarioId: integer('usuario_id').references(() => usuarios.id),
   motivo: text('motivo').notNull(),

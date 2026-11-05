@@ -1,7 +1,8 @@
 import { and, desc, eq, lt, ne } from 'drizzle-orm';
 import { config } from './config.js';
 import type { Db } from './db/index.js';
-import { auditoria, empleados, marcaciones } from './db/schema.js';
+import { empleados, marcaciones } from './db/schema.js';
+import { type Tx, auditar } from './rutas/comun.js';
 
 const MS_HORA = 3_600_000;
 
@@ -59,11 +60,9 @@ export async function marcar(db: Db, documento: string, ahora = new Date()): Pro
   });
 }
 
-type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
-
 async function enviarARevision(tx: Tx | Db, id: number, ahora: Date) {
   await tx.update(marcaciones).set({ estado: 'REVISION', actualizadoEn: ahora }).where(eq(marcaciones.id, id));
-  await tx.insert(auditoria).values({
+  await auditar(tx, {
     tabla: 'marcaciones',
     registroId: id,
     usuarioId: null,
