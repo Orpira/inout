@@ -2,6 +2,7 @@ import { ETIQUETAS, sumarDias, type Categoria } from "@inout/core";
 import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router";
 import { Cargando, Encabezado, MensajeError, Vacio } from "../componentes/ui";
 import { api, descargar } from "../lib/api";
 import { fechaISOCorta, horasDecimales, hoyLocal, pesos } from "../lib/formato";
@@ -35,7 +36,7 @@ export default function Liquidacion() {
     <div>
       <Encabezado
         titulo="Liquidación de recargos y horas extra"
-        descripcion="Valores a pagar adicionales al salario, por empleado, para los turnos cerrados del periodo. Los turnos por revisar no se incluyen hasta que se corrijan."
+        descripcion="Valores a pagar adicionales al salario, por empleado, para los turnos cerrados del periodo. Los turnos por revisar y las horas extra sin aprobar no se incluyen hasta que se resuelvan."
         acciones={
           <button className="btn btn-secundario" onClick={() => descargar(`/reportes/liquidacion?desde=${rango.desde}&hasta=${rango.hasta}&formato=csv`)}>
             <Download size={16} /> Descargar para nómina (CSV)
@@ -87,8 +88,15 @@ export default function Liquidacion() {
               <dd className="cifra text-[1.8rem] font-bold">{horasDecimales(q.data.totales.minutosTotales)} h</dd>
             </div>
             <div>
-              <dt className="text-[0.86rem] font-medium text-tinta-suave">Horas extra</dt>
+              <dt className="text-[0.86rem] font-medium text-tinta-suave">Horas extra liquidadas</dt>
               <dd className="cifra text-[1.8rem] font-bold text-extra-oscuro">{horasDecimales(q.data.totales.minutosExtra)} h</dd>
+              {q.data.totales.minutosExtraPendientes > 0 && (
+                <dd className="text-[0.86rem]">
+                  <Link to={`/marcaciones?extras=PENDIENTE&desde=${rango.desde}&hasta=${rango.hasta}`} className="font-semibold text-extra-oscuro underline underline-offset-2">
+                    {horasDecimales(q.data.totales.minutosExtraPendientes)} h más por aprobar
+                  </Link>
+                </dd>
+              )}
             </div>
             <div>
               <dt className="text-[0.86rem] font-medium text-tinta-suave">Total a liquidar</dt>
@@ -124,6 +132,9 @@ export default function Liquidacion() {
                       <td>
                         <p className="font-semibold">{f.nombre}</p>
                         <p className="text-[0.82rem] text-tinta-tenue tabular-nums">{f.identificacion}</p>
+                        {f.minutosExtraPendientes > 0 && (
+                          <p className="text-[0.82rem] font-medium text-extra-oscuro">{horasDecimales(f.minutosExtraPendientes)} h extra por aprobar</p>
+                        )}
                         {f.alertas.map((a) => (
                           <p key={a} className="text-[0.82rem] text-alerta">{a}</p>
                         ))}

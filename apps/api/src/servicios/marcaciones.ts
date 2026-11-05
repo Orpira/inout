@@ -1,9 +1,10 @@
-import { desdeLocal, fechaLocal, liquidar, sumarDias } from "@inout/core";
+import { desdeLocal, diaSemana, fechaLocal, horarioLegalPorDefecto, liquidar, minutosOrdinariosHorario, sumarDias, type Horario } from "@inout/core";
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { Db, DbTx } from "../db/client.js";
 import {
   auditoria,
   empleados,
+  horarios,
   liquidacionLineas,
   marcaciones,
   type Empleado,
@@ -126,6 +127,19 @@ export class ServicioMarcaciones {
         .where(and(eq(marcaciones.empleadoId, empleado.id), ne(marcaciones.estado, "ANULADA")))
         .orderBy(desc(marcaciones.entrada))
         .limit(1);
+      // Salida guardada sin conexión que llega después de que el turno pasara a revisión
+      // por falta de salida: cierra ese turno en lugar de abrir uno nuevo.
+      if (
+        opciones.offline &&
+        ultima?.estado === "REVISION" &&
+        !ultima.salida &&
+        momento.getTime() > ultima.entrada.getTime() &&
+        momento.getTime() - ultima.entrada.getTime() <= this.env.MAX_HORAS_TURNO * 3_600_000
+      ) {
+        const cerrada = await this.cerrar(tx, ultima, momento);
+        await this.auditar(tx, null, ultima.id, "CERRAR_SIN_CONEXION", "Salida recibida del kiosko al recuperar la conexión", instantanea(ultima), instantanea(cerrada));
+        return { tipo: "SALIDA", marcacion: cerrada, empleado: resumenEmpleado(empleado) };
+      }
       if (ultima?.salida && momento.getTime() - ultima.salida.getTime() < antirreboteMs) {
         throw conflicto("Ya registraste tu salida hace un momento.", "MARCA_DUPLICADA");
       }
@@ -152,10 +166,19 @@ export class ServicioMarcaciones {
   /**
    * Recalcula la liquidación de todas las marcaciones cerradas de un empleado en un día local,
    * en orden cronológico, para que la jornada ordinaria se consuma correctamente entre turnos.
+   *
+   * La jornada del día, el descanso, la tolerancia y la aprobación de extras salen del horario
+   * asignado al empleado (o de la jornada legal L-S si no tiene horario).
    */
   async recalcularDia(tx: DbTx, empleadoId: number, fecha: string) {
-    const [empleado] = await tx.select().from(empleados).where(eq(empleados.id, empleadoId));
-    if (!empleado) throw noEncontrado("Empleado");
+    const [fila] = await tx
+      .select({ empleado: empleados, horario: horarios })
+      .from(empleados)
+      .leftJoin(horarios, eq(horarios.id, empleados.horarioId))
+      .where(eq(empleados.id, empleadoId));
+    if (!fila) throw noEncontrado("Empleado");
+    const { empleado } = fila;
+    const horario: Horario = fila.horario ?? horarioLegalPorDefecto(fecha);
     const calendario = await this.calendario.obtener(tx);
     const delDia = await tx
       .select()
@@ -173,24 +196,64 @@ export class ServicioMarcaciones {
       await tx.delete(liquidacionLineas).where(inArray(liquidacionLineas.marcacionId, delDia.map((m) => m.id)));
     }
 
+    const cerradas = delDia.filter((m) => m.estado === "CERRADA" && m.salida);
+    const limite = minutosOrdinariosHorario(horario, diaSemana(fecha));
+    // Una pausa por duración solo se descuenta si el día tiene un único turno;
+    // si el empleado marcó salida y entrada para su pausa, ya está fuera del tiempo trabajado.
+    const descanso =
+      horario.descanso?.tipo === "DURACION" && cerradas.length > 1 ? null : horario.descanso;
+
     let previos = 0;
     for (const m of delDia) {
       if (m.estado !== "CERRADA" || !m.salida) {
         await tx
           .update(marcaciones)
-          .set({ minutosTotales: null, minutosExtra: null, valorRecargos: null, alertas: [] })
+          .set({
+            minutosTotales: null,
+            minutosExtra: null,
+            minutosExtraCalculados: null,
+            minutosDescanso: null,
+            estadoExtras: null,
+            valorRecargos: null,
+            alertas: [],
+          })
           .where(eq(marcaciones.id, m.id));
         continue;
       }
-      const r = liquidar({
+      const params = {
         entrada: m.entrada,
         salida: m.salida,
         salarioMensual: empleado.salario,
-        minutosOrdinariosDia: empleado.minutosJornadaDia,
+        minutosOrdinariosDia: limite,
         minutosPreviosDia: previos,
+        descanso,
         calendario,
-      });
-      previos += r.minutosTotales;
+      };
+      const bruto = liquidar(params);
+      const calculadas = bruto.minutosExtraCalculados;
+
+      // Decide cuántas extras se reconocen.
+      let estadoExtras: NonNullable<Marcacion["estadoExtras"]>;
+      let tope: number | null = null;
+      if (calculadas === 0) {
+        estadoExtras = "SIN_EXTRAS";
+      } else if (calculadas <= horario.toleranciaMinutos) {
+        estadoExtras = "TOLERANCIA";
+        tope = 0;
+      } else if (horario.requiereAprobacion) {
+        if (m.estadoExtras === "APROBADAS" || m.estadoExtras === "RECHAZADAS") {
+          estadoExtras = m.estadoExtras;
+          tope = m.minutosExtraAprobados ?? 0;
+        } else {
+          estadoExtras = "PENDIENTE";
+          tope = 0;
+        }
+      } else {
+        estadoExtras = "AUTOMATICAS";
+      }
+      const r = tope === null ? bruto : liquidar({ ...params, maxMinutosExtra: tope });
+      previos += r.minutosTrabajados;
+
       if (r.lineas.length) {
         await tx.insert(liquidacionLineas).values(
           r.lineas.map((l) => ({
@@ -208,11 +271,65 @@ export class ServicioMarcaciones {
         .set({
           minutosTotales: r.minutosTotales,
           minutosExtra: r.minutosExtra,
+          minutosExtraCalculados: calculadas,
+          minutosDescanso: r.minutosDescanso,
+          estadoExtras,
           valorRecargos: r.valorTotal,
           alertas: r.alertas,
         })
         .where(eq(marcaciones.id, m.id));
     }
+  }
+
+  /**
+   * Aprueba (total o parcialmente) o rechaza las horas extra de una marcación cerrada.
+   * Solo aplica a horarios que exigen aprobación.
+   */
+  async revisarExtras(
+    usuarioId: number,
+    id: number,
+    decision: { aprobar: boolean; minutos?: number | null; motivo?: string | null },
+  ) {
+    return this.db.transaction(async (tx) => {
+      const [m] = await tx.select().from(marcaciones).where(eq(marcaciones.id, id));
+      if (!m) throw noEncontrado("Marcación");
+      if (!["PENDIENTE", "APROBADAS", "RECHAZADAS"].includes(m.estadoExtras ?? "")) {
+        throw conflicto("Esta marcación no tiene horas extra por aprobar.");
+      }
+      const calculadas = m.minutosExtraCalculados ?? 0;
+      const minutos = decision.aprobar ? Math.min(decision.minutos ?? calculadas, calculadas) : 0;
+      if (decision.aprobar && minutos <= 0) throw solicitudInvalida("Indica cuántos minutos se aprueban.");
+      if (!decision.aprobar && !decision.motivo) throw solicitudInvalida("Indica el motivo del rechazo.");
+      const estadoExtras = decision.aprobar ? "APROBADAS" : "RECHAZADAS";
+      await tx
+        .update(marcaciones)
+        .set({ estadoExtras, minutosExtraAprobados: minutos, extrasRevisadasPor: usuarioId, extrasRevisadasEn: new Date() })
+        .where(eq(marcaciones.id, id));
+      await this.recalcularDia(tx, m.empleadoId, fechaLocal(m.entrada));
+      await this.auditar(
+        tx,
+        usuarioId,
+        id,
+        decision.aprobar ? "APROBAR_EXTRAS" : "RECHAZAR_EXTRAS",
+        decision.motivo ?? (minutos < calculadas ? `Aprobadas ${minutos} de ${calculadas} min` : null),
+        { estadoExtras: m.estadoExtras, minutosExtraAprobados: m.minutosExtraAprobados },
+        { estadoExtras, minutosExtraAprobados: minutos },
+      );
+      const [final] = await tx.select().from(marcaciones).where(eq(marcaciones.id, id));
+      return final!;
+    });
+  }
+
+  /** Aprueba todas las extras calculadas de varias marcaciones pendientes. */
+  async aprobarExtrasEnLote(usuarioId: number, ids: number[]) {
+    let n = 0;
+    for (const id of ids) {
+      const [m] = await this.db.select({ estado: marcaciones.estadoExtras }).from(marcaciones).where(eq(marcaciones.id, id));
+      if (m?.estado !== "PENDIENTE") continue;
+      await this.revisarExtras(usuarioId, id, { aprobar: true });
+      n++;
+    }
+    return n;
   }
 
   /** Recalcula todas las marcaciones cerradas en un rango (p. ej. tras cambiar festivos o salarios). */
@@ -319,12 +436,15 @@ export class ServicioMarcaciones {
         estado = otraAbierta ? "REVISION" : "ABIERTA";
       }
 
+      const cambianHoras = entrada.getTime() !== m.entrada.getTime() || (salida?.getTime() ?? null) !== (m.salida?.getTime() ?? null);
       const [actual] = await tx
         .update(marcaciones)
         .set({
           entrada,
           salida,
           estado,
+          // Si cambian las horas, una aprobación previa de extras deja de ser válida.
+          ...(cambianHoras ? { estadoExtras: null, minutosExtraAprobados: null, extrasRevisadasPor: null, extrasRevisadasEn: null } : {}),
           observacion,
         })
         .where(eq(marcaciones.id, id))

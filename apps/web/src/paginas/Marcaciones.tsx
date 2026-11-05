@@ -7,7 +7,7 @@ import { CintaJornada, LeyendaCinta } from "../componentes/CintaJornada";
 import { Cargando, Dialogo, Encabezado, EstadoChip, MensajeError, Paginacion, useAviso, Vacio } from "../componentes/ui";
 import { api, descargar } from "../lib/api";
 import { aInputLocal, desdeInputLocal, duracion, fechaCorta, hora, hoyLocal, nombreCompleto, pesos } from "../lib/formato";
-import type { Empleado, EstadoMarcacion, Marcacion, MarcacionDetalle, Pagina } from "../lib/tipos";
+import type { Empleado, EstadoMarcacion, MarcaOffline, Marcacion, MarcacionDetalle, Pagina } from "../lib/tipos";
 
 const ORIGEN: Record<Marcacion["origen"], string> = {
   KIOSKO: "Kiosko",
@@ -23,7 +23,7 @@ export default function Marcaciones() {
     hasta: sp.get("hasta") ?? hoyLocal(),
     estado: (sp.get("estado") ?? "") as EstadoMarcacion | "",
     q: sp.get("q") ?? "",
-    soloExtras: sp.get("soloExtras") === "1",
+    extras: (sp.get("extras") ?? "") as "" | "CON" | "PENDIENTE" | "APROBADAS" | "RECHAZADAS",
     pagina: Number(sp.get("pagina") ?? 1),
   };
   const fijar = (cambios: Record<string, string | number | boolean | null>) => {
@@ -39,7 +39,8 @@ export default function Marcaciones() {
   const qs = new URLSearchParams({ desde: filtros.desde, hasta: filtros.hasta, pagina: String(filtros.pagina), porPagina: "25" });
   if (filtros.estado) qs.set("estado", filtros.estado);
   if (filtros.q) qs.set("q", filtros.q);
-  if (filtros.soloExtras) qs.set("soloExtras", "true");
+  if (filtros.extras === "CON") qs.set("soloExtras", "true");
+  else if (filtros.extras) qs.set("estadoExtras", filtros.extras);
 
   const lista = useQuery({
     queryKey: ["marcaciones", qs.toString()],
@@ -48,6 +49,19 @@ export default function Marcaciones() {
   });
   const [detalleId, setDetalleId] = useState<number | null>(null);
   const [nueva, setNueva] = useState(false);
+  const [seleccion, setSeleccion] = useState<Set<number>>(new Set());
+  const qc = useQueryClient();
+  const aviso = useAviso();
+  const modoAprobacion = filtros.extras === "PENDIENTE";
+  const aprobarLote = useMutation({
+    mutationFn: () => api<{ aprobadas: number }>("/marcaciones/extras/aprobar-lote", { body: { ids: [...seleccion] } }),
+    onSuccess: (r) => {
+      setSeleccion(new Set());
+      void qc.invalidateQueries({ queryKey: ["marcaciones"] });
+      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      aviso(`${r.aprobadas} ${r.aprobadas === 1 ? "marcación aprobada" : "marcaciones aprobadas"}`);
+    },
+  });
 
   return (
     <div>
@@ -89,16 +103,35 @@ export default function Marcaciones() {
           <label className="etiqueta" htmlFor="f-q">Empleado</label>
           <input id="f-q" type="search" placeholder="Nombre o identificación" className="campo" defaultValue={filtros.q} onChange={(e) => fijar({ q: e.target.value })} />
         </div>
-        <label className="flex h-9 items-center gap-2 text-[0.93rem]">
-          <input type="checkbox" className="h-4 w-4 accent-[var(--color-extra)]" checked={filtros.soloExtras} onChange={(e) => fijar({ soloExtras: e.target.checked })} />
-          Solo con horas extra
-        </label>
+        <div>
+          <label className="etiqueta" htmlFor="f-extras">Horas extra</label>
+          <select id="f-extras" className="campo w-44" value={filtros.extras} onChange={(e) => fijar({ extras: e.target.value })}>
+            <option value="">Todas las marcaciones</option>
+            <option value="CON">Con horas extra</option>
+            <option value="PENDIENTE">Por aprobar</option>
+            <option value="APROBADAS">Aprobadas</option>
+            <option value="RECHAZADAS">Rechazadas</option>
+          </select>
+        </div>
       </div>
 
+      <BandejaSinConexion />
+
       <div className="panel overflow-hidden">
-        <div className="flex justify-end border-b border-linea px-4 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-linea px-4 py-2">
+          {modoAprobacion ? (
+            <div className="flex items-center gap-3">
+              <button className="btn btn-primario h-8" disabled={!seleccion.size || aprobarLote.isPending} onClick={() => aprobarLote.mutate()}>
+                Aprobar {seleccion.size ? `${seleccion.size} seleccionadas` : "seleccionadas"}
+              </button>
+              <span className="text-[0.86rem] text-tinta-suave">Aprueba todas las horas extra calculadas. Para aprobar una parte o rechazar, abre la marcación.</span>
+            </div>
+          ) : (
+            <span />
+          )}
           <LeyendaCinta />
         </div>
+        <MensajeError error={aprobarLote.error} />
         {lista.isPending ? (
           <Cargando />
         ) : lista.error ? (
@@ -112,6 +145,17 @@ export default function Marcaciones() {
             <table className="tabla">
               <thead>
                 <tr>
+                  {modoAprobacion && (
+                    <th className="w-8">
+                      <input
+                        type="checkbox"
+                        aria-label="Seleccionar todas"
+                        className="h-4 w-4 accent-[var(--color-petroleo)]"
+                        checked={lista.data.datos.length > 0 && lista.data.datos.every((m) => seleccion.has(m.id))}
+                        onChange={(e) => setSeleccion(e.target.checked ? new Set(lista.data.datos.map((m) => m.id)) : new Set())}
+                      />
+                    </th>
+                  )}
                   <th>Empleado</th>
                   <th>Fecha</th>
                   <th>Entrada</th>
@@ -126,6 +170,22 @@ export default function Marcaciones() {
               <tbody>
                 {lista.data.datos.map((m) => (
                   <tr key={m.id} className="cursor-pointer" onClick={() => setDetalleId(m.id)}>
+                    {modoAprobacion && (
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Seleccionar ${nombreCompleto(m.empleado)}`}
+                          className="h-4 w-4 accent-[var(--color-petroleo)]"
+                          checked={seleccion.has(m.id)}
+                          onChange={(e) => {
+                            const n = new Set(seleccion);
+                            if (e.target.checked) n.add(m.id);
+                            else n.delete(m.id);
+                            setSeleccion(n);
+                          }}
+                        />
+                      </td>
+                    )}
                     <td>
                       <button className="text-left font-semibold hover:text-petroleo" onClick={() => setDetalleId(m.id)}>
                         {nombreCompleto(m.empleado)}
@@ -136,10 +196,12 @@ export default function Marcaciones() {
                     <td className="tabular-nums">{hora(m.entrada)}</td>
                     <td className="tabular-nums">{m.salida ? hora(m.salida) : <span className="text-tinta-tenue">—</span>}</td>
                     <td>
-                      <CintaJornada entrada={m.entrada} salida={m.salida} minutosExtra={m.minutosExtra} variante="compacta" />
+                      <CintaJornada entrada={m.entrada} salida={m.salida} minutosExtra={m.minutosExtraCalculados ?? m.minutosExtra} variante="compacta" />
                     </td>
                     <td className="num whitespace-nowrap">{duracion(m.minutosTotales)}</td>
-                    <td className="num whitespace-nowrap font-semibold text-extra-oscuro">{m.minutosExtra ? duracion(m.minutosExtra) : ""}</td>
+                    <td className="num whitespace-nowrap">
+                      <CeldaExtras m={m} />
+                    </td>
                     <td className="num whitespace-nowrap">
                       {m.valorRecargos ? pesos(m.valorRecargos) : ""}
                       {m.alertas.length > 0 && <TriangleAlert size={14} className="ml-1 inline text-alerta" aria-label="Con alertas" />}
@@ -206,7 +268,7 @@ function DetalleMarcacion({ id }: { id: number }) {
             <span className="text-tinta-suave">Salida</span> <strong>{m.salida ? hora(m.salida) : "sin registrar"}</strong>
           </span>
         </div>
-        <CintaJornada entrada={m.entrada} salida={m.salida} minutosExtra={m.minutosExtra} />
+        <CintaJornada entrada={m.entrada} salida={m.salida} minutosExtra={m.minutosExtraCalculados ?? m.minutosExtra} />
       </div>
 
       {m.alertas.length > 0 && (
@@ -216,6 +278,12 @@ function DetalleMarcacion({ id }: { id: number }) {
           ))}
         </ul>
       )}
+
+      {(m.minutosDescanso ?? 0) > 0 && (
+        <p className="-mt-3 text-[0.9rem] text-tinta-suave">Se descontaron {duracion(m.minutosDescanso)} de descanso no remunerado.</p>
+      )}
+
+      {m.estado === "CERRADA" && <PanelExtras m={m} onCambio={refrescar} />}
 
       {m.estado === "REVISION" && modo === "ver" && (
         <p className="rounded-md border border-alerta/30 px-3 py-2 text-[0.93rem]">
@@ -327,14 +395,18 @@ const ACCIONES: Record<string, string> = {
   EDITAR: "Corrección",
   ANULAR: "Anulación",
   ENVIAR_REVISION: "Enviada a revisión",
+  APROBAR_EXTRAS: "Horas extra aprobadas",
+  RECHAZAR_EXTRAS: "Horas extra rechazadas",
+  CERRAR_SIN_CONEXION: "Salida recibida del kiosko sin conexión",
 };
 
 function CambiosAuditoria({ antes, despues }: { antes: NonNullable<MarcacionDetalle["historial"][number]["antes"]>; despues: NonNullable<MarcacionDetalle["historial"][number]["despues"]> }) {
   const filas: [string, string, string][] = [];
-  const fh = (v: string | null) => (v ? `${fechaCorta(v)} ${hora(v)}` : "sin salida");
-  if (antes.entrada !== despues.entrada) filas.push(["Entrada", fh(antes.entrada), fh(despues.entrada)]);
-  if (antes.salida !== despues.salida) filas.push(["Salida", fh(antes.salida), fh(despues.salida)]);
-  if (antes.estado !== despues.estado) filas.push(["Estado", antes.estado.toLowerCase(), despues.estado.toLowerCase()]);
+  const fh = (v: string | null | undefined) => (v ? `${fechaCorta(v)} ${hora(v)}` : "sin salida");
+  if ("entrada" in despues && antes.entrada !== despues.entrada) filas.push(["Entrada", fh(antes.entrada), fh(despues.entrada)]);
+  if ("salida" in despues && antes.salida !== despues.salida) filas.push(["Salida", fh(antes.salida), fh(despues.salida)]);
+  if ("estado" in despues && antes.estado !== despues.estado) filas.push(["Estado", (antes.estado ?? "").toLowerCase(), (despues.estado ?? "").toLowerCase()]);
+  if ("minutosExtraAprobados" in despues) filas.push(["Extras aprobadas", duracion(antes.minutosExtraAprobados ?? 0), duracion(despues.minutosExtraAprobados ?? 0)]);
   if (!filas.length) return null;
   return (
     <ul className="mt-1 text-[0.86rem] tabular-nums text-tinta-suave">
@@ -344,6 +416,198 @@ function CambiosAuditoria({ antes, despues }: { antes: NonNullable<MarcacionDeta
         </li>
       ))}
     </ul>
+  );
+}
+
+function CeldaExtras({ m }: { m: Marcacion }) {
+  const calc = m.minutosExtraCalculados ?? 0;
+  if (!calc) return null;
+  switch (m.estadoExtras) {
+    case "PENDIENTE":
+      return (
+        <span className="font-semibold text-extra-oscuro">
+          {duracion(calc)}
+          <span className="block text-[0.78rem] font-medium">por aprobar</span>
+        </span>
+      );
+    case "RECHAZADAS":
+      return (
+        <span className="text-tinta-tenue">
+          <span className="line-through">{duracion(calc)}</span>
+          <span className="block text-[0.78rem]">rechazadas</span>
+        </span>
+      );
+    case "TOLERANCIA":
+      return (
+        <span className="text-tinta-tenue">
+          {duracion(calc)}
+          <span className="block text-[0.78rem]">en tolerancia</span>
+        </span>
+      );
+    case "APROBADAS":
+      return (
+        <span className="font-semibold text-extra-oscuro">
+          {duracion(m.minutosExtra)}
+          {(m.minutosExtra ?? 0) < calc && <span className="block text-[0.78rem] font-medium">de {duracion(calc)}</span>}
+        </span>
+      );
+    default:
+      return <span className="font-semibold text-extra-oscuro">{duracion(m.minutosExtra)}</span>;
+  }
+}
+
+/** Aprobación, aprobación parcial o rechazo de las horas extra de una marcación. */
+function PanelExtras({ m, onCambio }: { m: MarcacionDetalle; onCambio: () => void }) {
+  const aviso = useAviso();
+  const calc = m.minutosExtraCalculados ?? 0;
+  const [modo, setModo] = useState<"ver" | "parcial" | "rechazar">("ver");
+  const [horas, setHoras] = useState("");
+  const [motivo, setMotivo] = useState("");
+  const mut = useMutation({
+    mutationFn: (body: { aprobar: boolean; minutos?: number; motivo?: string }) => api(`/marcaciones/${m.id}/extras`, { body }),
+    onSuccess: (_r, body) => {
+      onCambio();
+      setModo("ver");
+      aviso(body.aprobar ? "Horas extra aprobadas" : "Horas extra rechazadas");
+    },
+  });
+  if (!calc) return null;
+  if (m.estadoExtras === "TOLERANCIA") {
+    return <p className="text-[0.92rem] text-tinta-suave">Trabajó {duracion(calc)} por encima de su jornada, dentro de la tolerancia del horario: no se liquidan.</p>;
+  }
+  if (m.estadoExtras === "AUTOMATICAS") return null;
+
+  const titulo =
+    m.estadoExtras === "PENDIENTE"
+      ? `${duracion(calc)} extra por aprobar`
+      : m.estadoExtras === "APROBADAS"
+        ? `Aprobadas ${duracion(m.minutosExtraAprobados)} de ${duracion(calc)} extra`
+        : `${duracion(calc)} extra rechazadas`;
+
+  return (
+    <div className={`rounded-[10px] border p-4 ${m.estadoExtras === "PENDIENTE" ? "border-extra bg-extra-claro/60" : "border-linea"}`}>
+      <p className="font-bold">{titulo}</p>
+      <p className="mt-0.5 text-[0.9rem] text-tinta-suave">
+        {m.estadoExtras === "PENDIENTE"
+          ? "Mientras no se aprueben no entran en la liquidación."
+          : "Puedes cambiar la decisión; queda registrada en el historial."}
+      </p>
+      {modo === "ver" && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button className="btn btn-primario" disabled={mut.isPending} onClick={() => mut.mutate({ aprobar: true })}>
+            Aprobar {duracion(calc)}
+          </button>
+          <button className="btn btn-secundario" onClick={() => setModo("parcial")}>
+            Aprobar una parte
+          </button>
+          <button className="btn btn-peligro" onClick={() => setModo("rechazar")}>
+            Rechazar
+          </button>
+        </div>
+      )}
+      {modo === "parcial" && (
+        <form
+          className="mt-3 flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            mut.mutate({ aprobar: true, minutos: Math.round(Number(horas.replace(",", ".")) * 60), motivo: motivo || undefined });
+          }}
+        >
+          <div>
+            <label className="etiqueta" htmlFor="x-horas">Horas a aprobar</label>
+            <input id="x-horas" inputMode="decimal" required className="campo w-24" value={horas} onChange={(e) => setHoras(e.target.value)} placeholder="1,5" />
+          </div>
+          <div className="min-w-48 flex-1">
+            <label className="etiqueta" htmlFor="x-mot">Motivo (opcional)</label>
+            <input id="x-mot" className="campo" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+          </div>
+          <button className="btn btn-primario" disabled={mut.isPending}>Aprobar</button>
+          <button type="button" className="btn btn-fantasma" onClick={() => setModo("ver")}>Cancelar</button>
+        </form>
+      )}
+      {modo === "rechazar" && (
+        <form
+          className="mt-3 flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            mut.mutate({ aprobar: false, motivo });
+          }}
+        >
+          <div className="min-w-56 flex-1">
+            <label className="etiqueta" htmlFor="x-rech">Motivo del rechazo</label>
+            <input id="x-rech" required minLength={5} className="campo" placeholder="Ej.: no fueron autorizadas" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+          </div>
+          <button className="btn btn-peligro" disabled={mut.isPending}>Rechazar extras</button>
+          <button type="button" className="btn btn-fantasma" onClick={() => setModo("ver")}>Cancelar</button>
+        </form>
+      )}
+      <MensajeError error={mut.error} />
+    </div>
+  );
+}
+
+/** Marcaciones del kiosko capturadas sin conexión que el servidor no pudo aplicar. */
+function BandejaSinConexion() {
+  const qc = useQueryClient();
+  const aviso = useAviso();
+  const q = useQuery({ queryKey: ["offline", "RECHAZADA"], queryFn: () => api<{ datos: MarcaOffline[] }>("/marcaciones/offline?estado=RECHAZADA") });
+  const [resolviendo, setResolviendo] = useState<string | null>(null);
+  const [nota, setNota] = useState("");
+  const mut = useMutation({
+    mutationFn: (id: string) => api(`/marcaciones/offline/${id}/resolver`, { body: { nota } }),
+    onSuccess: () => {
+      setResolviendo(null);
+      setNota("");
+      void qc.invalidateQueries({ queryKey: ["offline"] });
+      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      aviso("Marcación marcada como resuelta");
+    },
+  });
+  if (!q.data?.datos.length) return null;
+  return (
+    <section className="mb-4 rounded-[10px] border border-alerta/40 bg-superficie">
+      <div className="border-b border-linea px-4 py-3">
+        <h2 className="font-bold text-alerta">
+          {q.data.datos.length} {q.data.datos.length === 1 ? "marcación del kiosko no se pudo aplicar" : "marcaciones del kiosko no se pudieron aplicar"}
+        </h2>
+        <p className="text-[0.9rem] text-tinta-suave">
+          Se capturaron sin conexión y el servidor no pudo registrarlas automáticamente. Regístralas a mano si corresponde y márcalas como resueltas.
+        </p>
+      </div>
+      <ul className="divide-y divide-linea">
+        {q.data.datos.map((x) => (
+          <li key={x.id} className="px-4 py-3 text-[0.93rem]">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span>
+                <strong>{x.empleado ?? `Código ${x.codigo}`}</strong>
+                <span className="ml-3 tabular-nums">{fechaCorta(x.capturadoEn)}, {hora(x.capturadoEn)}</span>
+                {x.dispositivo && <span className="ml-3 text-tinta-tenue">{x.dispositivo}</span>}
+              </span>
+              {resolviendo !== x.id && (
+                <button className="btn btn-secundario h-8" onClick={() => setResolviendo(x.id)}>
+                  Marcar como resuelta
+                </button>
+              )}
+            </div>
+            <p className="text-alerta">{x.mensaje}</p>
+            {resolviendo === x.id && (
+              <form
+                className="mt-2 flex flex-wrap gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  mut.mutate(x.id);
+                }}
+              >
+                <input required minLength={5} className="campo min-w-64 flex-1" placeholder="Cómo se resolvió (ej.: registrada manualmente)" value={nota} onChange={(e) => setNota(e.target.value)} aria-label="Nota de resolución" />
+                <button className="btn btn-primario" disabled={mut.isPending}>Guardar</button>
+                <button type="button" className="btn btn-fantasma" onClick={() => setResolviendo(null)}>Cancelar</button>
+              </form>
+            )}
+          </li>
+        ))}
+      </ul>
+      <MensajeError error={mut.error} />
+    </section>
   );
 }
 

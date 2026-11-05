@@ -1,7 +1,30 @@
-import type { Categoria, ParametrosVigentes } from "@inout/core";
+import type { Categoria, Horario as HorarioCore, ParametrosVigentes, ValidacionHorario } from "@inout/core";
 
 export type Rol = "ADMIN" | "SUPERVISOR";
 export type EstadoMarcacion = "ABIERTA" | "CERRADA" | "REVISION" | "ANULADA";
+export type EstadoExtras = "SIN_EXTRAS" | "TOLERANCIA" | "PENDIENTE" | "APROBADAS" | "RECHAZADAS" | "AUTOMATICAS";
+
+export interface Horario extends HorarioCore {
+  id: number;
+  nombre: string;
+  activo: boolean;
+  empleados?: number;
+  validacion?: ValidacionHorario;
+}
+
+export interface MarcaOffline {
+  id: string;
+  codigo: string;
+  capturadoEn: string;
+  recibidoEn: string;
+  desfaseSegundos: number;
+  dispositivo: string | null;
+  estado: "APLICADA" | "RECHAZADA" | "RESUELTA";
+  mensaje: string | null;
+  notaResolucion: string | null;
+  empleado: string | null;
+  empleadoId: number | null;
+}
 
 export interface Usuario {
   id: number;
@@ -21,7 +44,8 @@ export interface Empleado {
   email: string | null;
   telefono: string | null;
   salario: number;
-  minutosJornadaDia: number | null;
+  horarioId: number | null;
+  horario?: string | null;
   fechaIngreso: string | null;
   activo: boolean;
   enTurno?: boolean;
@@ -37,6 +61,10 @@ export interface Marcacion {
   observacion: string | null;
   minutosTotales: number | null;
   minutosExtra: number | null;
+  minutosExtraCalculados: number | null;
+  minutosExtraAprobados: number | null;
+  minutosDescanso: number | null;
+  estadoExtras: EstadoExtras | null;
   valorRecargos: number | null;
   alertas: string[];
   empleado: Pick<Empleado, "id" | "nombre" | "apellido" | "identificacion" | "cargo">;
@@ -55,8 +83,8 @@ export interface EventoAuditoria {
   id: number;
   accion: string;
   motivo: string | null;
-  antes: { entrada: string; salida: string | null; estado: string; observacion: string | null } | null;
-  despues: { entrada: string; salida: string | null; estado: string; observacion: string | null } | null;
+  antes: Partial<{ entrada: string; salida: string | null; estado: string; observacion: string | null; estadoExtras: string | null; minutosExtraAprobados: number | null }> | null;
+  despues: Partial<{ entrada: string; salida: string | null; estado: string; observacion: string | null; estadoExtras: string | null; minutosExtraAprobados: number | null }> | null;
   creadoEn: string;
   usuario: string | null;
 }
@@ -81,6 +109,8 @@ export interface Dashboard {
   entradasHoy: number;
   empleadosHoy: number;
   enRevision: number;
+  extrasPendientes: { marcaciones: number; minutos: number };
+  offlineRechazadas: number;
   mes: { minutosExtra: number; valor: number; turnos: number };
   serie: { fecha: string; minutosTotales: number; minutosExtra: number; festivo: string | null }[];
   topExtras: { empleadoId: number; nombre: string; minutosExtra: number; valor: number }[];
@@ -98,6 +128,7 @@ export interface FilaLiquidacion {
   turnos: number;
   minutosTotales: number;
   minutosExtra: number;
+  minutosExtraPendientes: number;
   valorTotal: number;
   categorias: Partial<Record<Categoria, { minutos: number; valor: number }>>;
   alertas: string[];
@@ -112,6 +143,7 @@ export interface ReporteLiquidacion {
     turnos: number;
     minutosTotales: number;
     minutosExtra: number;
+    minutosExtraPendientes: number;
     valorTotal: number;
     categorias: Record<Categoria, { minutos: number; valor: number }>;
   };

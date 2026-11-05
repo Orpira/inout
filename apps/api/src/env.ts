@@ -15,7 +15,7 @@ const esquema = z.object({
   /** Ventana anti-rebote entre marcaciones del mismo empleado (segundos). */
   ANTIREBOTE_SEGUNDOS: z.coerce.number().min(0).default(60),
   /** Horas hacia atrás aceptadas para marcaciones capturadas sin conexión. */
-  MAX_HORAS_OFFLINE: z.coerce.number().min(0).default(48),
+  MAX_HORAS_OFFLINE: z.coerce.number().min(0).default(168),
   /** Ruta al build del frontend para servirlo desde la API (opcional). */
   WEB_DIST: z.string().optional(),
   COOKIE_SECURE: z

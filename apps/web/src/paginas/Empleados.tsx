@@ -6,7 +6,7 @@ import { Cargando, Dialogo, Encabezado, MensajeError, useAviso, Vacio } from "..
 import { api } from "../lib/api";
 import { duracion, hoyLocal, nombreCompleto, pesos } from "../lib/formato";
 import { useSesion } from "../lib/sesion";
-import type { Empleado } from "../lib/tipos";
+import type { Empleado, Horario } from "../lib/tipos";
 
 export default function Empleados() {
   const { usuario } = useSesion();
@@ -67,7 +67,7 @@ export default function Empleados() {
                 <th>Nombre</th>
                 <th>Cargo</th>
                 <th className="num">Salario</th>
-                <th className="num">Jornada diaria</th>
+                <th>Horario</th>
                 <th>Estado</th>
               </tr>
             </thead>
@@ -78,9 +78,7 @@ export default function Empleados() {
                   <td className="font-semibold">{esAdmin ? <button className="text-left hover:text-petroleo">{nombreCompleto(e)}</button> : nombreCompleto(e)}</td>
                   <td className="text-tinta-suave">{e.cargo ?? "—"}</td>
                   <td className="num">{pesos(e.salario)}</td>
-                  <td className="num">
-                    {e.minutosJornadaDia ? duracion(e.minutosJornadaDia) : <span className="text-tinta-tenue">Legal ({duracion(jornadaLegal)})</span>}
-                  </td>
+                  <td>{e.horario ?? <span className="text-tinta-tenue">Jornada legal L-S ({duracion(jornadaLegal)})</span>}</td>
                   <td>
                     {!e.activo ? (
                       <span className="text-tinta-tenue">Inactivo</span>
@@ -117,10 +115,11 @@ function FormEmpleado({ empleado, onListo, jornadaLegal }: { empleado: Empleado 
     email: empleado?.email ?? "",
     telefono: empleado?.telefono ?? "",
     salario: empleado ? String(empleado.salario) : "",
-    jornadaHoras: empleado?.minutosJornadaDia ? String(empleado.minutosJornadaDia / 60) : "",
+    horarioId: empleado?.horarioId ? String(empleado.horarioId) : "",
     fechaIngreso: empleado?.fechaIngreso ?? "",
     activo: empleado?.activo ?? true,
   });
+  const horarios = useQuery({ queryKey: ["horarios"], queryFn: () => api<{ datos: Horario[] }>("/horarios") });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
 
   const mut = useMutation({
@@ -128,7 +127,7 @@ function FormEmpleado({ empleado, onListo, jornadaLegal }: { empleado: Empleado 
       const body = {
         ...f,
         salario: Number(f.salario),
-        minutosJornadaDia: f.jornadaHoras ? Math.round(Number(f.jornadaHoras.replace(",", ".")) * 60) : null,
+        horarioId: f.horarioId ? Number(f.horarioId) : null,
       };
       return empleado ? api(`/empleados/${empleado.id}`, { method: "PUT", body }) : api("/empleados", { body });
     },
@@ -152,9 +151,18 @@ function FormEmpleado({ empleado, onListo, jornadaLegal }: { empleado: Empleado 
         <Campo id="apellido" etiqueta="Apellidos" valor={f.apellido} onChange={set("apellido")} requerido />
         <Campo id="salario" etiqueta="Salario mensual (COP)" valor={f.salario} onChange={set("salario")} requerido tipo="number" />
         <div>
-          <label className="etiqueta" htmlFor="jornada">Jornada diaria pactada (horas)</label>
-          <input id="jornada" type="number" step="0.25" min="1" max="12" className="campo" placeholder={`Legal: ${(jornadaLegal / 60).toLocaleString("es-CO")} h`} value={f.jornadaHoras} onChange={set("jornadaHoras")} />
-          <p className="mt-1 text-[0.8rem] text-tinta-tenue">Déjalo vacío para usar la jornada legal vigente.</p>
+          <label className="etiqueta" htmlFor="horario">Horario</label>
+          <select id="horario" className="campo" value={f.horarioId} onChange={set("horarioId")}>
+            <option value="">Jornada legal L-S ({duracion(jornadaLegal)} diarias)</option>
+            {horarios.data?.datos
+              .filter((h) => h.activo || String(h.id) === f.horarioId)
+              .map((h) => (
+                <option key={h.id} value={h.id}>
+                  {h.nombre}
+                </option>
+              ))}
+          </select>
+          <p className="mt-1 text-[0.8rem] text-tinta-tenue">Define la jornada ordinaria, el descanso y si sus extras requieren aprobación.</p>
         </div>
         <Campo id="email" etiqueta="Correo" valor={f.email} onChange={set("email")} tipo="email" />
         <Campo id="telefono" etiqueta="Teléfono" valor={f.telefono} onChange={set("telefono")} />

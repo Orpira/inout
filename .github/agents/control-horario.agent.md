@@ -17,7 +17,9 @@ Monorepo npm workspaces · TypeScript · PostgreSQL
 | `apps/api` | Fastify 5 + Drizzle ORM. Esquema en `src/db/schema.ts`, migraciones en `drizzle/`, lógica de marcación en `src/servicios/marcaciones.ts` |
 | `apps/web` | React 19 + Vite + Tailwind 4 + TanStack Query. Kiosko en `src/paginas/Kiosko.tsx` |
 
-Tablas: `empleados`, `marcaciones` (ABIERTA/CERRADA/REVISION/ANULADA), `liquidacion_lineas`, `auditoria`, `festivos_ajustes`, `usuarios`.
+Tablas: `horarios` (FIJO administrativo / TURNOS bodega), `empleados`, `marcaciones` (ABIERTA/CERRADA/REVISION/ANULADA, con `estado_extras` para la aprobación), `liquidacion_lineas`, `marcas_offline` (sincronización del kiosko sin conexión), `auditoria`, `festivos_ajustes`, `usuarios`.
+
+Kiosko sin conexión: `apps/web/src/lib/kioskoOffline.ts` (cola con UUID y directorio local) y `apps/api/src/servicios/offline.ts` (aplicación idempotente y en orden).
 
 Reglas legales y conceptos: ver `docs/reglas-liquidacion.md`.
 

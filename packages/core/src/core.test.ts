@@ -7,6 +7,10 @@ import {
   festivosColombia,
   inicioNocturno,
   liquidar,
+  minutosHorarioFijo,
+  minutosOrdinariosHorario,
+  validarHorario,
+  type Horario,
   recargoDominical,
   type Categoria,
 } from "./index.js";
@@ -173,5 +177,116 @@ describe("motor de liquidación", () => {
     expect(() =>
       liquidar({ ...base, entrada: desdeLocal("2026-11-05", "10:00"), salida: desdeLocal("2026-11-05", "09:00") }),
     ).toThrow();
+  });
+});
+
+describe("horarios: administrativo fijo y operativo de bodega", () => {
+  const cal2 = crearCalendario();
+  const base = { salarioMensual: 2_100_000, calendario: cal2 };
+  const almuerzo = { tipo: "VENTANA" as const, inicio: "12:00", fin: "13:00" };
+  const dia = (inicio: string, fin: string) => ({ laborable: true, inicio, fin, minutos: minutosHorarioFijo(inicio, fin, almuerzo) });
+  const administrativo: Horario = {
+    tipo: "FIJO",
+    dias: [
+      { laborable: false, minutos: 0 },
+      dia("08:00", "17:00"),
+      dia("08:00", "17:00"),
+      dia("08:00", "17:00"),
+      dia("08:00", "17:00"),
+      dia("08:00", "17:00"),
+      { laborable: false, minutos: 0 },
+    ],
+    descanso: almuerzo,
+    toleranciaMinutos: 15,
+    requiereAprobacion: true,
+  };
+
+  it("deriva 8 h diarias de 08:00 a 17:00 con almuerzo de 12:00 a 13:00", () => {
+    expect(minutosHorarioFijo("08:00", "17:00", almuerzo)).toBe(480);
+    expect(minutosOrdinariosHorario(administrativo, 4)).toBe(480);
+    expect(minutosOrdinariosHorario(administrativo, 6)).toBe(0);
+    expect(validarHorario(administrativo, "2026-11-05").errores).toEqual([]);
+  });
+
+  it("valida la Ley 2101: máximo 9 h diarias, total semanal y día de descanso", () => {
+    const largo = { ...administrativo, dias: administrativo.dias.map((d) => (d.laborable ? { ...d, minutos: 600 } : d)) };
+    expect(validarHorario(largo, "2026-11-05").errores.join(" ")).toMatch(/9 horas/);
+    const seisDias = { ...administrativo, dias: administrativo.dias.map((d, i) => (i === 0 ? d : { ...d, laborable: true, minutos: 480 })) };
+    expect(validarHorario(seisDias, "2026-11-05").errores.join(" ")).toMatch(/42 h/);
+    const sieteDias = { ...administrativo, dias: administrativo.dias.map(() => ({ laborable: true, minutos: 300 })) };
+    expect(validarHorario(sieteDias, "2026-11-05").errores.join(" ")).toMatch(/descanso/);
+  });
+
+  it("descuenta el almuerzo y deja las extras pendientes sin liquidar", () => {
+    const r = liquidar({
+      ...base,
+      entrada: desdeLocal("2026-11-05", "07:50"),
+      salida: desdeLocal("2026-11-05", "17:40"),
+      minutosOrdinariosDia: 480,
+      descanso: almuerzo,
+      maxMinutosExtra: 0,
+    });
+    expect(r.minutosPresencia).toBe(590);
+    expect(r.minutosDescanso).toBe(60);
+    expect(r.minutosExtraCalculados).toBe(50);
+    expect(r.minutosExtraNoReconocidos).toBe(50);
+    expect(r.minutosTotales).toBe(480);
+    expect(r.valorTotal).toBe(0);
+  });
+
+  it("liquida solo las extras aprobadas", () => {
+    const r = liquidar({
+      ...base,
+      entrada: desdeLocal("2026-11-05", "08:00"),
+      salida: desdeLocal("2026-11-05", "19:00"),
+      minutosOrdinariosDia: 480,
+      descanso: almuerzo,
+      maxMinutosExtra: 60,
+    });
+    expect(r.minutosExtraCalculados).toBe(120);
+    expect(minutos(r, "EXT_DIURNA")).toBe(60);
+    expect(r.valorTotal).toBe(12_500);
+  });
+
+  it("el sábado de un administrativo es todo hora extra", () => {
+    const r = liquidar({
+      ...base,
+      entrada: desdeLocal("2026-11-07", "08:00"),
+      salida: desdeLocal("2026-11-07", "12:00"),
+      minutosOrdinariosDia: minutosOrdinariosHorario(administrativo, 6),
+    });
+    expect(minutos(r, "EXT_DIURNA")).toBe(240);
+    expect(r.valorTotal).toBe(50_000);
+  });
+
+  it("bodega: pausa de 30 min tras 4 h y extras desde la hora 7", () => {
+    const pausa = { tipo: "DURACION" as const, minutos: 30, despuesDe: 240 };
+    const r = liquidar({
+      ...base,
+      entrada: desdeLocal("2026-11-05", "06:00"),
+      salida: desdeLocal("2026-11-05", "15:00"),
+      minutosOrdinariosDia: 420,
+      descanso: pausa,
+    });
+    expect(r.minutosDescanso).toBe(30);
+    expect(minutos(r, "ORD_DIURNA")).toBe(420);
+    expect(minutos(r, "EXT_DIURNA")).toBe(90);
+
+    // Si sale antes de cumplir la pausa, no se descuenta.
+    const corto = liquidar({ ...base, entrada: desdeLocal("2026-11-05", "06:00"), salida: desdeLocal("2026-11-05", "10:10"), minutosOrdinariosDia: 420, descanso: pausa });
+    expect(corto.minutosDescanso).toBe(0);
+  });
+
+  it("bodega: turno de noche que se alarga hasta el amanecer", () => {
+    const r = liquidar({
+      ...base,
+      entrada: desdeLocal("2026-11-05", "22:00"),
+      salida: desdeLocal("2026-11-06", "08:00"),
+      minutosOrdinariosDia: 420,
+    });
+    expect(minutos(r, "ORD_NOCTURNA")).toBe(420);
+    expect(minutos(r, "EXT_NOCTURNA")).toBe(60); // 05:00-06:00
+    expect(minutos(r, "EXT_DIURNA")).toBe(120); // 06:00-08:00
+    expect(r.alertas.join(" ")).toMatch(/2 horas extra/);
   });
 });

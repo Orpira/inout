@@ -126,7 +126,7 @@ try {
   const svc = new ServicioMarcaciones(db, new ServicioCalendario(), {
     MAX_HORAS_TURNO: 16,
     ANTIREBOTE_SEGUNDOS: 60,
-    MAX_HORAS_OFFLINE: 48,
+    MAX_HORAS_OFFLINE: 168,
   });
   const dias = await svc.recalcularRango("2000-01-01", "2100-12-31");
 

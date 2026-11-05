@@ -16,17 +16,20 @@ import { COOKIE_SESION, rutasAuth } from "./rutas/auth.js";
 import { rutasConfig } from "./rutas/config.js";
 import { rutasDashboard } from "./rutas/dashboard.js";
 import { rutasEmpleados } from "./rutas/empleados.js";
+import { rutasHorarios } from "./rutas/horarios.js";
 import { rutasKiosko } from "./rutas/kiosko.js";
 import { rutasMarcaciones } from "./rutas/marcaciones.js";
 import { rutasReportes } from "./rutas/reportes.js";
 import { rutasUsuarios } from "./rutas/usuarios.js";
 import { ServicioCalendario } from "./servicios/calendario.js";
 import { ServicioMarcaciones } from "./servicios/marcaciones.js";
+import { ServicioOffline } from "./servicios/offline.js";
 
 export async function construirApp(env: Env, opciones: { db?: Db; logger?: boolean } = {}) {
   const { db, cliente } = opciones.db ? { db: opciones.db, cliente: null } : crearDb(env.DATABASE_URL);
   const calendario = new ServicioCalendario();
-  const ctx: Contexto = { db, env, calendario, marcaciones: new ServicioMarcaciones(db, calendario, env) };
+  const svcMarcaciones = new ServicioMarcaciones(db, calendario, env);
+  const ctx: Contexto = { db, env, calendario, marcaciones: svcMarcaciones, offline: new ServicioOffline(db, svcMarcaciones) };
 
   const app = Fastify({
     logger: opciones.logger ?? env.NODE_ENV !== "test",
@@ -94,6 +97,7 @@ export async function construirApp(env: Env, opciones: { db?: Db; logger?: boole
     ["/api/auth", rutasAuth],
     ["/api/kiosko", rutasKiosko],
     ["/api/empleados", rutasEmpleados],
+    ["/api/horarios", rutasHorarios],
     ["/api/marcaciones", rutasMarcaciones],
     ["/api/reportes", rutasReportes],
     ["/api/dashboard", rutasDashboard],

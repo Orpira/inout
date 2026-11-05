@@ -22,6 +22,7 @@ interface FilaReporte {
   turnos: number;
   minutosTotales: number;
   minutosExtra: number;
+  minutosExtraPendientes: number;
   valorTotal: number;
   categorias: Partial<Record<Categoria, { minutos: number; valor: number }>>;
   alertas: string[];
@@ -72,6 +73,7 @@ export const rutasReportes: Rutas = (app, { db }) => {
           turnos: sql<number>`count(*)::int`,
           minutosTotales: sql<number>`coalesce(sum(${marcaciones.minutosTotales}),0)::int`,
           minutosExtra: sql<number>`coalesce(sum(${marcaciones.minutosExtra}),0)::int`,
+          minutosExtraPendientes: sql<number>`coalesce(sum(${marcaciones.minutosExtraCalculados}) filter (where ${marcaciones.estadoExtras} = 'PENDIENTE'),0)::int`,
           valorTotal: sql<number>`coalesce(sum(${marcaciones.valorRecargos}),0)::float8`,
         })
         .from(marcaciones)
@@ -115,6 +117,7 @@ export const rutasReportes: Rutas = (app, { db }) => {
       turnos: datos.reduce((s, f) => s + f.turnos, 0),
       minutosTotales: datos.reduce((s, f) => s + f.minutosTotales, 0),
       minutosExtra: datos.reduce((s, f) => s + f.minutosExtra, 0),
+      minutosExtraPendientes: datos.reduce((s, f) => s + f.minutosExtraPendientes, 0),
       valorTotal: Math.round(datos.reduce((s, f) => s + f.valorTotal, 0) * 100) / 100,
       categorias: Object.fromEntries(
         CATEGORIAS.map((c) => [
@@ -135,7 +138,8 @@ export const rutasReportes: Rutas = (app, { db }) => {
         "Salario",
         "Turnos",
         "Horas trabajadas",
-        "Horas extra",
+        "Horas extra liquidadas",
+        "Horas extra pendientes de aprobación",
         ...CATEGORIAS.flatMap((c) => [`${ETIQUETAS[c].corta} horas`, `${ETIQUETAS[c].corta} valor`]),
         "Total a pagar (recargos y extras)",
         "Alertas",
@@ -148,6 +152,7 @@ export const rutasReportes: Rutas = (app, { db }) => {
         f.turnos,
         horas(f.minutosTotales),
         horas(f.minutosExtra),
+        horas(f.minutosExtraPendientes),
         ...CATEGORIAS.flatMap((c) => [horas(f.categorias[c]?.minutos ?? 0), pesos(f.categorias[c]?.valor ?? 0)]),
         pesos(f.valorTotal),
         f.alertas.join(" | "),

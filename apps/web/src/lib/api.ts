@@ -16,12 +16,15 @@ const tokenKiosko = () => {
   }
 };
 
-export async function api<T>(ruta: string, opciones: { method?: string; body?: unknown } = {}): Promise<T> {
+export async function api<T>(ruta: string, opciones: { method?: string; body?: unknown; timeoutMs?: number } = {}): Promise<T> {
   const headers: Record<string, string> = {};
   if (opciones.body !== undefined) headers["Content-Type"] = "application/json";
   const tk = tokenKiosko();
   if (tk && ruta.startsWith("/kiosko")) headers["x-kiosko-token"] = tk;
 
+  // Una red inestable puede dejar la petición colgada: pasado el plazo se trata como sin conexión.
+  const control = new AbortController();
+  const plazo = opciones.timeoutMs ? setTimeout(() => control.abort(), opciones.timeoutMs) : null;
   let res: Response;
   try {
     res = await fetch(`/api${ruta}`, {
@@ -29,9 +32,12 @@ export async function api<T>(ruta: string, opciones: { method?: string; body?: u
       headers,
       credentials: "same-origin",
       body: opciones.body !== undefined ? JSON.stringify(opciones.body) : undefined,
+      signal: control.signal,
     });
   } catch {
     throw new ErrorApi(0, "Sin conexión con el servidor", "SIN_CONEXION");
+  } finally {
+    if (plazo) clearTimeout(plazo);
   }
   if (!res.ok) {
     let cuerpo: { error?: string; codigo?: string } = {};

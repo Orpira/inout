@@ -5,6 +5,7 @@ import type { Env } from "./env.js";
 import { ErrorHttp } from "./errores.js";
 import type { ServicioCalendario } from "./servicios/calendario.js";
 import type { ServicioMarcaciones } from "./servicios/marcaciones.js";
+import type { ServicioOffline } from "./servicios/offline.js";
 
 export type Rol = "ADMIN" | "SUPERVISOR";
 
@@ -26,6 +27,7 @@ export interface Contexto {
   env: Env;
   calendario: ServicioCalendario;
   marcaciones: ServicioMarcaciones;
+  offline: ServicioOffline;
 }
 
 export type Rutas = (app: FastifyInstance, ctx: Contexto) => Promise<void> | void;

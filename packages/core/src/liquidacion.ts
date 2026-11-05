@@ -22,6 +22,7 @@
  */
 import type { CalendarioFestivos } from "./festivos.js";
 import { aHoraLocal } from "./fechas.js";
+import { aMinutos, type Descanso } from "./horarios.js";
 import {
   FIN_NOCTURNO_MIN,
   MAX_EXTRA_DIA_MIN,
@@ -92,6 +93,13 @@ export interface EntradaLiquidacion {
   minutosOrdinariosDia?: number | null;
   /** Minutos ya trabajados ese mismo día en marcaciones anteriores (cuentan para la jornada). */
   minutosPreviosDia?: number;
+  /** Descanso no remunerado que se descuenta del tiempo de presencia. */
+  descanso?: Descanso | null;
+  /**
+   * Máximo de minutos extra que se reconocen en esta marcación (aprobación o tolerancia).
+   * null/undefined = todas. Los minutos extra que excedan el tope no se liquidan.
+   */
+  maxMinutosExtra?: number | null;
 }
 
 export interface LineaLiquidacion {
@@ -106,6 +114,17 @@ export interface ResultadoLiquidacion {
   valorHora: number;
   divisor: number;
   minutosOrdinariosDia: number;
+  /** Tiempo entre entrada y salida. */
+  minutosPresencia: number;
+  /** Descanso no remunerado descontado. */
+  minutosDescanso: number;
+  /** Presencia menos descanso (incluye extras no reconocidas). Se usa para la jornada de los turnos siguientes. */
+  minutosTrabajados: number;
+  /** Extras que resultan de las marcaciones, antes de aprobación o tolerancia. */
+  minutosExtraCalculados: number;
+  /** Extras calculadas que no se liquidan (pendientes, rechazadas o dentro de la tolerancia). */
+  minutosExtraNoReconocidos: number;
+  /** Minutos liquidados: ordinarios + extras reconocidas. */
   minutosTotales: number;
   minutosOrdinarios: number;
   minutosExtra: number;
@@ -133,17 +152,44 @@ export function liquidar(p: EntradaLiquidacion): ResultadoLiquidacion {
   const limite = p.minutosOrdinariosDia ?? minutosOrdinariosPorDefecto(fechaBase);
   const previos = Math.max(0, p.minutosPreviosDia ?? 0);
 
-  const total = Math.floor((p.salida.getTime() - p.entrada.getTime()) / 60_000);
+  const presencia = Math.floor((p.salida.getTime() - p.entrada.getTime()) / 60_000);
+  const tope = p.maxMinutosExtra ?? Infinity;
   const acumulado = new Map<string, LineaLiquidacion>();
   let nocturnos = 0;
   let df = 0;
+  let trabajados = 0;
+  let descanso = 0;
+  let extraCalculado = 0;
+  let noReconocidos = 0;
 
-  for (let m = 0; m < total; m++) {
+  // Descanso por duración: se toma una vez, tras `despuesDe` minutos trabajados en la marcación.
+  let descansoPendiente = p.descanso?.tipo === "DURACION" ? p.descanso.minutos : 0;
+  const ventana = p.descanso?.tipo === "VENTANA" ? [aMinutos(p.descanso.inicio), aMinutos(p.descanso.fin)] : null;
+  const despuesDe = p.descanso?.tipo === "DURACION" ? p.descanso.despuesDe : 0;
+
+  for (let m = 0; m < presencia; m++) {
     const t = aHoraLocal(new Date(p.entrada.getTime() + m * 60_000));
+    const enVentana = ventana !== null && t.minutoDelDia >= ventana[0]! && t.minutoDelDia < ventana[1]!;
+    const enPausa = descansoPendiente > 0 && trabajados >= despuesDe && presencia - m > descansoPendiente;
+    if (enVentana || enPausa) {
+      descanso++;
+      if (enPausa) descansoPendiente--;
+      continue;
+    }
+
+    const extra = previos + trabajados >= limite;
+    trabajados++;
+    if (extra) {
+      extraCalculado++;
+      if (extraCalculado > tope) {
+        noReconocidos++;
+        continue;
+      }
+    }
+
     const nocturno =
       t.minutoDelDia >= inicioNocturno(t.fecha) || t.minutoDelDia < FIN_NOCTURNO_MIN;
     const dominicalFestivo = t.diaSemana === 0 || p.calendario.esFestivo(t.fecha);
-    const extra = previos + m >= limite;
 
     const categoria = `${extra ? "EXT" : "ORD"}_${nocturno ? "NOCTURNA" : "DIURNA"}${
       dominicalFestivo ? "_DF" : ""
@@ -164,20 +210,26 @@ export function liquidar(p: EntradaLiquidacion): ResultadoLiquidacion {
     .sort((a, b) => CATEGORIAS.indexOf(a.categoria) - CATEGORIAS.indexOf(b.categoria));
 
   const minutosExtra = lineas.filter((l) => esExtra(l.categoria)).reduce((s, l) => s + l.minutos, 0);
+  const total = trabajados - noReconocidos;
   const alertas: string[] = [];
-  const extraDia = Math.max(0, previos + total - limite) ;
+  const extraDia = Math.max(0, previos + trabajados - limite);
   if (extraDia > MAX_EXTRA_DIA_MIN) {
     alertas.push(
       `Supera el máximo legal de 2 horas extra diarias (${(extraDia / 60).toFixed(2)} h en el día).`,
     );
   }
-  if (total > 16 * 60) alertas.push("Turno de más de 16 horas: verifique la marcación.");
+  if (presencia > 16 * 60) alertas.push("Turno de más de 16 horas: verifique la marcación.");
 
   return {
     fechaBase,
     valorHora: redondear(valorHora),
     divisor,
     minutosOrdinariosDia: limite,
+    minutosPresencia: presencia,
+    minutosDescanso: descanso,
+    minutosTrabajados: trabajados,
+    minutosExtraCalculados: extraCalculado,
+    minutosExtraNoReconocidos: noReconocidos,
     minutosTotales: total,
     minutosOrdinarios: total - minutosExtra,
     minutosExtra,

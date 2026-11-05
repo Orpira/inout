@@ -19,9 +19,27 @@ Fijos: recargo nocturno 35 %, hora extra diurna 25 %, hora extra nocturna 75 % (
 
 **Valor hora ordinaria** = salario mensual ÷ (jornada semanal × 30 ÷ 6), con la jornada vigente el día de la entrada.
 
-## Jornada ordinaria diaria
+## Jornada ordinaria diaria y horarios
 
-Por defecto, jornada semanal legal ÷ 6 (7 h con 42 h). Cada empleado puede tener una jornada diaria pactada distinta (p. ej. 8 h en esquemas de 5 días). Los minutos que superan esa jornada en el mismo día (sumando todos los turnos que empiezan ese día) son horas extra.
+La jornada ordinaria de cada día sale del **horario** asignado al empleado:
+
+- **Horario fijo** (administrativo): entrada a salida menos la franja de descanso. 08:00 a 17:00 con almuerzo de 12:00 a 13:00 = 8 h.
+- **Turnos** (bodega): horas ordinarias definidas por día de la semana.
+- **Sin horario**: jornada legal vigente ÷ 6 de lunes a sábado (7 h con 42 h).
+
+Los minutos que superan la jornada del día (sumando todos los turnos que empiezan ese día) son horas extra. En un día **no laborable** del horario, todo lo trabajado es extra. Un festivo que cae en día laborable conserva la jornada de ese día y lleva recargo festivo.
+
+**Descanso no remunerado.** Se descuenta del tiempo de presencia: la franja fija si el turno la cubre, o la pausa por duración tras X horas de trabajo (solo si el día tiene un único turno; si el empleado marcó salida y entrada para su pausa, ya está fuera).
+
+**Reconocimiento de extras:**
+
+| Situación | Estado | Se liquida |
+| --- | --- | --- |
+| Extras ≤ tolerancia del horario | Tolerancia | No |
+| Horario sin aprobación | Automáticas | Sí, todas |
+| Horario con aprobación, sin decidir | Por aprobar | No |
+| Aprobadas (total o parcial) | Aprobadas | Solo lo aprobado |
+| Rechazadas (con motivo) | Rechazadas | No |
 
 ## Conceptos y factores
 
@@ -54,6 +72,7 @@ El calendario se puede ajustar desde **Festivos y normas** (días cívicos, o si
 
 ## Supuestos a validar con nómina
 
+- Las horas trabajadas en un día no laborable del horario (sábado del administrativo, domingo) se liquidan como **extra** (con recargo dominical si es domingo o festivo), porque superan la jornada semanal ya distribuida. Si la empresa liquida el domingo ocasional como ordinario con recargo y descanso compensatorio, se puede reflejar marcando ese día como laborable en el horario.
 - Todo trabajo en domingo se liquida con recargo dominical. El CST distingue el dominical habitual del ocasional a efectos de descanso compensatorio; ese descanso no lo gestiona el sistema.
 - El valor hora se calcula con el salario actual del empleado. Si el salario cambia a mitad de periodo, recalcula solo desde la fecha del cambio.
 - Los turnos que empiezan un día cuentan para la jornada ordinaria de ese día aunque terminen al siguiente.

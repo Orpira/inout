@@ -1,6 +1,6 @@
 import { and, asc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { empleados } from "../db/schema.js";
+import { empleados, horarios } from "../db/schema.js";
 import { conflicto, noEncontrado } from "../errores.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
 
@@ -15,7 +15,7 @@ export const esquemaEmpleado = z.object({
   email: z.string().trim().email("Correo inválido").nullish().or(z.literal("")).transform((v) => (v ? v : null)),
   telefono: opcional,
   salario: z.coerce.number().min(0, "No puede ser negativo").max(1_000_000_000),
-  minutosJornadaDia: z.coerce.number().int().min(60).max(720).nullish().transform((v) => v ?? null),
+  horarioId: z.coerce.number().int().nullish().transform((v) => v ?? null),
   fechaIngreso: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish().or(z.literal("")).transform((v) => (v ? v : null)),
   activo: z.boolean().default(true),
 });
@@ -54,13 +54,15 @@ export const rutasEmpleados: Rutas = (app, { db }) => {
       const filas = await db
         .select({
           empleado: empleados,
+          horario: horarios.nombre,
           // Columna cualificada a mano: dentro de la subconsulta un "id" sin tabla se resolvería como m.id.
           enTurno: sql<boolean>`exists(select 1 from marcaciones m where m.empleado_id = "empleados"."id" and m.estado = 'ABIERTA')`,
         })
         .from(empleados)
+        .leftJoin(horarios, eq(horarios.id, empleados.horarioId))
         .where(and(...filtros))
         .orderBy(asc(empleados.apellido), asc(empleados.nombre));
-      return { datos: filas.map((f) => ({ ...f.empleado, enTurno: f.enTurno })) };
+      return { datos: filas.map((f) => ({ ...f.empleado, horario: f.horario, enTurno: f.enTurno })) };
     },
   );
 

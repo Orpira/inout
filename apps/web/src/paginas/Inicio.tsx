@@ -22,17 +22,38 @@ export default function Inicio() {
         </p>
       </div>
 
+      {d.offlineRechazadas > 0 && (
+        <p role="alert" className="rounded-md border border-alerta/40 bg-alerta-claro px-4 py-2.5 text-alerta">
+          {d.offlineRechazadas === 1 ? "Una marcación capturada sin conexión" : `${d.offlineRechazadas} marcaciones capturadas sin conexión`} no se pudo aplicar.{" "}
+          <Link to="/marcaciones" className="font-semibold underline underline-offset-2">Resolver en Marcaciones</Link>
+        </p>
+      )}
+
       {/* Cifras del día y del mes */}
       <dl className="grid grid-cols-2 gap-x-6 gap-y-5 border-y border-linea py-5 md:grid-cols-5">
-        <Cifra titulo="En turno ahora" valor={`${d.presentes.length}`} detalle={`de ${d.empleadosActivos} empleados activos`} />
-        <Cifra titulo="Entradas hoy" valor={`${d.entradasHoy}`} detalle={`${d.empleadosHoy} personas distintas`} />
+        <Cifra titulo="En turno ahora" valor={`${d.presentes.length}`} detalle={`${d.empleadosHoy} han marcado hoy, de ${d.empleadosActivos} activos`} />
+        <Cifra
+          titulo="Extras por aprobar"
+          valor={horasDecimales(d.extrasPendientes.minutos)}
+          unidad="h"
+          detalle={
+            d.extrasPendientes.marcaciones ? (
+              <Link to="/marcaciones?extras=PENDIENTE" className="font-semibold text-extra-oscuro underline-offset-2 hover:underline">
+                Revisar {d.extrasPendientes.marcaciones} {d.extrasPendientes.marcaciones === 1 ? "turno" : "turnos"}
+              </Link>
+            ) : (
+              "Nada pendiente"
+            )
+          }
+          tono={d.extrasPendientes.marcaciones ? "extra" : undefined}
+        />
         <Cifra
           titulo="Por revisar"
           valor={`${d.enRevision}`}
           detalle={d.enRevision ? <Link to="/marcaciones?estado=REVISION" className="font-semibold text-alerta underline-offset-2 hover:underline">Turnos sin salida</Link> : "Todo al día"}
           tono={d.enRevision ? "alerta" : undefined}
         />
-        <Cifra titulo="Horas extra del mes" valor={horasDecimales(d.mes.minutosExtra)} unidad="h" detalle={`en ${d.mes.turnos} turnos cerrados`} tono="extra" />
+        <Cifra titulo="Horas extra liquidadas del mes" valor={horasDecimales(d.mes.minutosExtra)} unidad="h" detalle={`en ${d.mes.turnos} turnos cerrados`} />
         <Cifra titulo="Recargos y extras del mes" valor={pesos(d.mes.valor)} detalle="valor a liquidar" />
       </dl>
 

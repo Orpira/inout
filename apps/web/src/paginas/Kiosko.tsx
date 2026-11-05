@@ -1,49 +1,51 @@
 import { aHoraLocal, crearCalendario, desdeLocal, inicioNocturno } from "@inout/core";
-import { Camera, Check, Delete, LogIn, LogOut, ScanLine, WifiOff, X } from "lucide-react";
+import { Camera, Check, CloudUpload, Delete, LogIn, LogOut, ScanLine, WifiOff, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Marca } from "../componentes/Marco";
 import { api, ErrorApi } from "../lib/api";
 import { duracion, fechaLarga, hora } from "../lib/formato";
+import {
+  actualizarDirectorio,
+  buscarEnDirectorio,
+  cola,
+  directorioDisponible,
+  encolar,
+  registrarEstadoLocal,
+  sincronizar,
+} from "../lib/kioskoOffline";
 
 interface EmpleadoKiosko {
-  id: number;
   nombre: string;
   apellido: string;
   identificacion: string;
   cargo: string | null;
-  proximaMarca: "ENTRADA" | "SALIDA";
+  /** null = sin conexión y sin directorio: no se sabe si toca entrada o salida. */
+  proximaMarca: "ENTRADA" | "SALIDA" | null;
   abiertaDesde: string | null;
 }
 interface RespuestaMarca {
   tipo: "ENTRADA" | "SALIDA";
-  empleado: { nombre: string; apellido: string };
+  empleado: { nombre: string; apellido: string; identificacion: string };
   aviso: string | null;
-  marcacion: { entrada: string; salida: string | null; minutosTotales: number | null; minutosExtra: number | null };
+  marcacion: {
+    entrada: string;
+    salida: string | null;
+    minutosTotales: number | null;
+    minutosExtra: number | null;
+    minutosExtraCalculados: number | null;
+    estadoExtras: string | null;
+  };
 }
 type Paso =
   | { t: "codigo" }
   | { t: "buscando" }
-  | { t: "confirmar"; empleado: EmpleadoKiosko }
-  | { t: "registrando"; empleado: EmpleadoKiosko }
+  | { t: "confirmar"; empleado: EmpleadoKiosko; offline: boolean }
+  | { t: "registrando"; empleado: EmpleadoKiosko; offline: boolean }
   | { t: "hecho"; r: RespuestaMarca }
-  | { t: "offline"; codigo: string; guardada: boolean };
+  | { t: "guardada"; empleado: EmpleadoKiosko; tipo: "ENTRADA" | "SALIDA" | null; momento: string };
 
-const COLA = "inout.kioskoCola";
 const calendario = crearCalendario();
-const leerCola = (): { codigo: string; capturadoEn: string }[] => {
-  try {
-    return JSON.parse(localStorage.getItem(COLA) ?? "[]");
-  } catch {
-    return [];
-  }
-};
-const guardarCola = (c: { codigo: string; capturadoEn: string }[]) => {
-  try {
-    localStorage.setItem(COLA, JSON.stringify(c));
-  } catch {
-    /* almacenamiento no disponible */
-  }
-};
+const PLAZO_MS = 6000;
 
 function useAhora() {
   const [ahora, setAhora] = useState(() => new Date());
@@ -54,13 +56,17 @@ function useAhora() {
   return ahora;
 }
 
+const sinRed = (e: unknown) => e instanceof ErrorApi && (e.status === 0 || e.status >= 500);
+
 export default function Kiosko() {
   const ahora = useAhora();
   const [codigo, setCodigo] = useState("");
   const [paso, setPaso] = useState<Paso>({ t: "codigo" });
   const [error, setError] = useState<string | null>(null);
   const [escaneando, setEscaneando] = useState(false);
-  const [pendientes, setPendientes] = useState(() => leerCola().length);
+  const [pendientes, setPendientes] = useState(() => cola().length);
+  const [enLinea, setEnLinea] = useState(() => navigator.onLine);
+  const [envio, setEnvio] = useState<string | null>(null);
   const entrada = useRef<HTMLInputElement>(null);
 
   // Token del dispositivo: /kiosko?token=XXXX lo guarda y limpia la URL.
@@ -75,6 +81,8 @@ export default function Kiosko() {
       }
       history.replaceState(null, "", "/kiosko");
     }
+    // Pide al navegador que no borre los datos de la tablet por falta de espacio.
+    void navigator.storage?.persist?.();
   }, []);
 
   const reiniciar = useCallback(() => {
@@ -86,7 +94,7 @@ export default function Kiosko() {
 
   // Vuelve al inicio automáticamente tras confirmar o si se deja a medias.
   useEffect(() => {
-    if (paso.t === "hecho" || paso.t === "offline") {
+    if (paso.t === "hecho" || paso.t === "guardada") {
       const t = setTimeout(reiniciar, paso.t === "hecho" && paso.r.aviso ? 9000 : 6000);
       return () => clearTimeout(t);
     }
@@ -96,70 +104,104 @@ export default function Kiosko() {
     }
   }, [paso, reiniciar]);
 
-  // Sincroniza marcaciones guardadas sin conexión.
-  const sincronizar = useCallback(async () => {
-    const cola = leerCola();
-    if (!cola.length) return;
-    const restantes: typeof cola = [];
-    for (const m of cola) {
-      try {
-        await api("/kiosko/marcar", { body: m });
-      } catch (e) {
-        if (e instanceof ErrorApi && e.status === 0) restantes.push(m);
-        // Otros errores (duplicado, demasiado antigua) se descartan: el supervisor lo verá como faltante.
-      }
+  // Envío de la cola y actualización del directorio.
+  const sincronizarAhora = useCallback(async () => {
+    if (!cola().length) return;
+    const r = await sincronizar();
+    const quedan = cola().length;
+    setPendientes(quedan);
+    if (r.enviadas + r.rechazadas > 0) {
+      setEnLinea(true);
+      setEnvio(
+        `${r.enviadas + r.rechazadas} ${r.enviadas + r.rechazadas === 1 ? "marcación enviada" : "marcaciones enviadas"} al servidor` +
+          (r.rechazadas ? `; ${r.rechazadas} quedaron para revisión del supervisor.` : "."),
+      );
+      setTimeout(() => setEnvio(null), 8000);
     }
-    guardarCola(restantes);
-    setPendientes(restantes.length);
   }, []);
   useEffect(() => {
-    void sincronizar();
-    const t = setInterval(sincronizar, 30000);
-    window.addEventListener("online", sincronizar);
-    return () => {
-      clearInterval(t);
-      window.removeEventListener("online", sincronizar);
+    void actualizarDirectorio().then(() => sincronizarAhora());
+    const tCola = setInterval(sincronizarAhora, 20_000);
+    const tDir = setInterval(() => void actualizarDirectorio(), 15 * 60_000);
+    const online = () => {
+      setEnLinea(true);
+      void sincronizarAhora();
+      void actualizarDirectorio();
     };
-  }, [sincronizar]);
+    const offline = () => setEnLinea(false);
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+    return () => {
+      clearInterval(tCola);
+      clearInterval(tDir);
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
+    };
+  }, [sincronizarAhora]);
+
+  /** Busca el empleado en la tablet cuando no hay servidor. */
+  const buscarSinConexion = (c: string) => {
+    setEnLinea(false);
+    const e = buscarEnDirectorio(c);
+    if (!e && directorioDisponible()) {
+      setError(`No encontramos el código ${c}. Revisa el número o habla con tu supervisor.`);
+      setPaso({ t: "codigo" });
+      return;
+    }
+    setPaso({
+      t: "confirmar",
+      offline: true,
+      empleado: e
+        ? { ...e, proximaMarca: e.abiertaDesde ? "SALIDA" : "ENTRADA" }
+        : { nombre: "Código", apellido: c, identificacion: c, cargo: null, proximaMarca: null, abiertaDesde: null },
+    });
+  };
 
   const buscar = async (c: string) => {
     const limpio = c.trim();
     if (!limpio) return;
     setError(null);
+    if (!navigator.onLine) return buscarSinConexion(limpio);
     setPaso({ t: "buscando" });
     try {
-      const empleado = await api<EmpleadoKiosko>(`/kiosko/empleado/${encodeURIComponent(limpio)}`);
-      setPaso({ t: "confirmar", empleado });
+      const empleado = await api<EmpleadoKiosko>(`/kiosko/empleado/${encodeURIComponent(limpio)}`, { timeoutMs: PLAZO_MS });
+      setEnLinea(true);
+      setPaso({ t: "confirmar", empleado, offline: false });
     } catch (e) {
-      if (e instanceof ErrorApi && e.status === 0) {
-        setPaso({ t: "offline", codigo: limpio, guardada: false });
-      } else {
-        setError(e instanceof ErrorApi && e.status === 404 ? `No encontramos el código ${limpio}. Revisa el número o habla con tu supervisor.` : (e as Error).message);
-        setPaso({ t: "codigo" });
-      }
+      if (sinRed(e)) return buscarSinConexion(limpio);
+      setError(e instanceof ErrorApi && e.status === 404 ? `No encontramos el código ${limpio}. Revisa el número o habla con tu supervisor.` : (e as Error).message);
+      setPaso({ t: "codigo" });
     }
   };
 
-  const registrar = async (empleado: EmpleadoKiosko) => {
-    setPaso({ t: "registrando", empleado });
+  const guardarEnTablet = (empleado: EmpleadoKiosko) => {
+    const momento = new Date();
+    const { tipo } = encolar(empleado.identificacion, momento);
+    setPendientes(cola().length);
+    setPaso({ t: "guardada", empleado, tipo: tipo ?? empleado.proximaMarca, momento: momento.toISOString() });
+  };
+
+  const registrar = async (empleado: EmpleadoKiosko, offline: boolean) => {
+    // Si hay marcas pendientes, la nueva va a la cola para respetar el orden cronológico.
+    if (offline || cola().length > 0) {
+      guardarEnTablet(empleado);
+      void sincronizarAhora();
+      return;
+    }
+    setPaso({ t: "registrando", empleado, offline });
     try {
-      const r = await api<RespuestaMarca>("/kiosko/marcar", { body: { codigo: empleado.identificacion } });
+      const r = await api<RespuestaMarca>("/kiosko/marcar", { body: { codigo: empleado.identificacion }, timeoutMs: PLAZO_MS });
+      registrarEstadoLocal(empleado.identificacion, r.tipo, r.tipo === "ENTRADA" ? r.marcacion.entrada : r.marcacion.salida!);
       setPaso({ t: "hecho", r });
     } catch (e) {
-      if (e instanceof ErrorApi && e.status === 0) {
-        guardarOffline(empleado.identificacion);
+      if (sinRed(e)) {
+        setEnLinea(false);
+        guardarEnTablet(empleado);
         return;
       }
       setError((e as Error).message);
-      setPaso({ t: "confirmar", empleado });
+      setPaso({ t: "confirmar", empleado, offline });
     }
-  };
-
-  const guardarOffline = (c: string) => {
-    const cola = [...leerCola(), { codigo: c, capturadoEn: new Date().toISOString() }];
-    guardarCola(cola);
-    setPendientes(cola.length);
-    setPaso({ t: "offline", codigo: c, guardada: true });
   };
 
   const enviar = (e: FormEvent) => {
@@ -180,17 +222,24 @@ export default function Kiosko() {
   const nocturno = l.minutoDelDia >= iniNoche || l.minutoDelDia < 360;
   const hh = String(l.hora).padStart(2, "0");
   const mm = String(l.minuto).padStart(2, "0");
+  const extrasTexto = (r: RespuestaMarca) => {
+    const calc = r.marcacion.minutosExtraCalculados ?? 0;
+    if (!calc || r.marcacion.estadoExtras === "TOLERANCIA") return null;
+    return r.marcacion.estadoExtras === "PENDIENTE" ? `${duracion(calc)} extra, pendientes de aprobación` : `${duracion(calc)} extra`;
+  };
 
   return (
     <div className="min-h-dvh bg-petroleo-oscuro text-white">
       <div className="mx-auto grid min-h-dvh max-w-[1280px] gap-8 px-6 py-6 lg:grid-cols-[1.1fr_1fr] lg:gap-14 lg:px-12 lg:py-10">
         {/* Reloj y contexto del día */}
         <section className="flex flex-col justify-between gap-8">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <Marca claro />
-            {pendientes > 0 && (
-              <span className="inline-flex items-center gap-2 rounded-md bg-extra px-3 py-1 text-sm font-semibold text-tinta">
-                <WifiOff size={15} /> {pendientes} {pendientes === 1 ? "marcación pendiente" : "marcaciones pendientes"} de enviar
+            {(!enLinea || pendientes > 0) && (
+              <span className="inline-flex items-center gap-2 rounded-md bg-extra px-3 py-1.5 text-sm font-semibold text-tinta">
+                {enLinea ? <CloudUpload size={16} /> : <WifiOff size={16} />}
+                {!enLinea ? "Sin conexión" : "Enviando"}
+                {pendientes > 0 && `: ${pendientes} ${pendientes === 1 ? "marcación guardada" : "marcaciones guardadas"} en la tablet`}
               </span>
             )}
           </div>
@@ -211,6 +260,7 @@ export default function Kiosko() {
                     ? `Franja nocturna hasta las 06:00. El recargo nocturno aplica desde las ${String(iniNoche / 60).padStart(2, "0")}:00.`
                     : `Franja diurna. La jornada nocturna empieza a las ${String(iniNoche / 60).padStart(2, "0")}:00.`}
             </p>
+            {envio && <p className="mt-3 text-white/90" role="status">{envio}</p>}
           </div>
 
           <DiaEnCurso ahora={ahora} />
@@ -267,18 +317,33 @@ export default function Kiosko() {
 
             {(paso.t === "confirmar" || paso.t === "registrando") && (
               <div>
-                <p className="text-tinta-suave">Hola,</p>
-                <p className="text-[2rem] font-bold leading-tight">
-                  {paso.empleado.nombre} {paso.empleado.apellido}
-                </p>
-                <p className="mt-1 text-tinta-suave">
-                  <span>{paso.empleado.cargo ?? "Sin cargo asignado"}</span>
-                  <span className="ml-4 tabular-nums">Código {paso.empleado.identificacion}</span>
-                </p>
+                {paso.offline && (
+                  <p className="mb-4 flex items-start gap-2 rounded-md bg-extra-claro px-3 py-2 text-[0.95rem] text-extra-oscuro">
+                    <WifiOff size={18} className="mt-0.5 shrink-0" />
+                    Sin conexión con el servidor. La marcación se guarda en esta tablet con la hora actual y se envía sola al volver la red.
+                  </p>
+                )}
+                {paso.empleado.proximaMarca === null ? (
+                  <>
+                    <p className="text-tinta-suave">Vas a registrar una marcación para el código</p>
+                    <p className="cifra text-[2.4rem] font-bold leading-tight">{paso.empleado.identificacion}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-tinta-suave">Hola,</p>
+                    <p className="text-[2rem] font-bold leading-tight">
+                      {paso.empleado.nombre} {paso.empleado.apellido}
+                    </p>
+                    <p className="mt-1 text-tinta-suave">
+                      <span>{paso.empleado.cargo ?? "Sin cargo asignado"}</span>
+                      <span className="ml-4 tabular-nums">Código {paso.empleado.identificacion}</span>
+                    </p>
+                  </>
+                )}
                 {paso.empleado.abiertaDesde && (
                   <p className="mt-4 rounded-md bg-petroleo-claro px-3 py-2 text-petroleo-oscuro">
                     Entraste a las <strong>{hora(paso.empleado.abiertaDesde)}</strong>. Llevas{" "}
-                    {duracion(Math.floor((ahora.getTime() - new Date(paso.empleado.abiertaDesde).getTime()) / 60000))}.
+                    {duracion(Math.max(0, Math.floor((ahora.getTime() - new Date(paso.empleado.abiertaDesde).getTime()) / 60000)))}.
                   </p>
                 )}
                 {error && (
@@ -289,17 +354,19 @@ export default function Kiosko() {
                 <button
                   autoFocus
                   disabled={paso.t === "registrando"}
-                  onClick={() => registrar(paso.empleado)}
+                  onClick={() => registrar(paso.empleado, paso.offline)}
                   className={`mt-6 flex h-24 w-full items-center justify-center gap-3 rounded-lg text-[1.6rem] font-bold text-white disabled:opacity-60 ${
-                    paso.empleado.proximaMarca === "ENTRADA" ? "bg-petroleo" : "bg-noche"
+                    paso.empleado.proximaMarca === "SALIDA" ? "bg-noche" : "bg-petroleo"
                   }`}
                 >
-                  {paso.empleado.proximaMarca === "ENTRADA" ? <LogIn size={30} /> : <LogOut size={30} />}
+                  {paso.empleado.proximaMarca === "SALIDA" ? <LogOut size={30} /> : <LogIn size={30} />}
                   {paso.t === "registrando"
                     ? "Registrando…"
                     : paso.empleado.proximaMarca === "ENTRADA"
                       ? "Registrar entrada"
-                      : "Registrar salida"}
+                      : paso.empleado.proximaMarca === "SALIDA"
+                        ? "Registrar salida"
+                        : "Registrar marcación"}
                 </button>
                 <button className="btn btn-fantasma mt-3 h-12 w-full text-base" onClick={reiniciar}>
                   No soy yo
@@ -325,10 +392,10 @@ export default function Kiosko() {
                 </p>
                 {paso.r.tipo === "SALIDA" && (
                   <p className="mt-4 text-lg">
-                    Trabajaste <strong>{duracion(paso.r.marcacion.minutosTotales)}</strong>
-                    {(paso.r.marcacion.minutosExtra ?? 0) > 0 && (
+                    Trabajaste <strong>{duracion((paso.r.marcacion.minutosTotales ?? 0) + Math.max(0, (paso.r.marcacion.minutosExtraCalculados ?? 0) - (paso.r.marcacion.minutosExtra ?? 0)))}</strong>
+                    {extrasTexto(paso.r) && (
                       <>
-                        , de ellas <strong className="text-extra-oscuro">{duracion(paso.r.marcacion.minutosExtra)} extra</strong>
+                        , de ellas <strong className="text-extra-oscuro">{extrasTexto(paso.r)}</strong>
                       </>
                     )}
                     .
@@ -341,33 +408,22 @@ export default function Kiosko() {
               </div>
             )}
 
-            {paso.t === "offline" && (
+            {paso.t === "guardada" && (
               <div className="text-center">
                 <span className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-extra text-tinta">
-                  <WifiOff size={38} />
+                  <Check size={44} strokeWidth={3} />
                 </span>
-                {paso.guardada ? (
-                  <>
-                    <p className="mt-5 text-2xl font-bold">Marcación guardada sin conexión</p>
-                    <p className="mt-2 text-tinta-suave">
-                      Registramos la hora {hora(new Date())} para el código {paso.codigo}. Se enviará automáticamente cuando vuelva la red.
-                    </p>
-                    <button className="btn btn-secundario mt-6 h-12 w-full text-base" onClick={reiniciar}>
-                      Listo
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <p className="mt-5 text-2xl font-bold">No hay conexión con el servidor</p>
-                    <p className="mt-2 text-tinta-suave">Puedes guardar la marcación ahora con la hora actual y se enviará al reconectar.</p>
-                    <button className="btn btn-primario mt-6 h-14 w-full text-lg" onClick={() => guardarOffline(paso.codigo)}>
-                      Guardar marcación de {paso.codigo}
-                    </button>
-                    <button className="btn btn-fantasma mt-2 h-12 w-full text-base" onClick={reiniciar}>
-                      Cancelar
-                    </button>
-                  </>
-                )}
+                <p className="mt-5 text-2xl font-bold">
+                  {paso.tipo === "ENTRADA" ? "Entrada guardada" : paso.tipo === "SALIDA" ? "Salida guardada" : "Marcación guardada"}
+                </p>
+                <p className="cifra mt-1 text-[3.5rem] font-bold leading-none">{hora(paso.momento)}</p>
+                <p className="mt-3 text-lg text-tinta-suave">
+                  {paso.empleado.proximaMarca === null ? `Código ${paso.empleado.identificacion}` : `${paso.empleado.nombre} ${paso.empleado.apellido}`}
+                </p>
+                <p className="mt-4 text-tinta-suave">Quedó guardada en esta tablet y se enviará al servidor automáticamente, en orden con las demás.</p>
+                <button className="btn btn-secundario mt-6 h-12 w-full text-base" onClick={reiniciar}>
+                  Listo
+                </button>
               </div>
             )}
           </div>

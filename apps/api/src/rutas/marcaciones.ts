@@ -1,7 +1,7 @@
 import { desdeLocal, sumarDias } from "@inout/core";
 import { and, asc, count, desc, eq, gte, ilike, lt, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { auditoria, empleados, liquidacionLineas, marcaciones, usuarios } from "../db/schema.js";
+import { auditoria, empleados, liquidacionLineas, marcaciones, marcasOffline, usuarios } from "../db/schema.js";
 import { noEncontrado } from "../errores.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
 
@@ -20,6 +20,10 @@ export const columnasMarcacion = {
   observacion: marcaciones.observacion,
   minutosTotales: marcaciones.minutosTotales,
   minutosExtra: marcaciones.minutosExtra,
+  minutosExtraCalculados: marcaciones.minutosExtraCalculados,
+  minutosExtraAprobados: marcaciones.minutosExtraAprobados,
+  minutosDescanso: marcaciones.minutosDescanso,
+  estadoExtras: marcaciones.estadoExtras,
   valorRecargos: marcaciones.valorRecargos,
   alertas: marcaciones.alertas,
   empleado: {
@@ -48,6 +52,7 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
           estado: z.enum(["ABIERTA", "CERRADA", "REVISION", "ANULADA"]).optional(),
           q: z.string().optional(),
           soloExtras: z.coerce.boolean().optional(),
+          estadoExtras: z.enum(["SIN_EXTRAS", "TOLERANCIA", "PENDIENTE", "APROBADAS", "RECHAZADAS", "AUTOMATICAS"]).optional(),
           pagina: z.coerce.number().int().min(1).default(1),
           porPagina: z.coerce.number().int().min(5).max(200).default(25),
         }),
@@ -60,7 +65,8 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
         f.hasta ? lt(marcaciones.entrada, desdeLocal(sumarDias(f.hasta, 1))) : undefined,
         f.empleadoId ? eq(marcaciones.empleadoId, f.empleadoId) : undefined,
         f.estado ? eq(marcaciones.estado, f.estado) : undefined,
-        f.soloExtras ? sql`${marcaciones.minutosExtra} > 0` : undefined,
+        f.soloExtras ? sql`${marcaciones.minutosExtraCalculados} > 0` : undefined,
+        f.estadoExtras ? eq(marcaciones.estadoExtras, f.estadoExtras) : undefined,
       ];
       if (f.q) {
         const p = `%${f.q.trim()}%`;
@@ -160,6 +166,63 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
     "/:id/anular",
     { onRequest: sesion, schema: { params: id, body: z.object({ motivo }) } },
     async (req) => ctx.marcaciones.anular(req.user.id, req.params.id, req.body.motivo),
+  );
+
+  r.post(
+    "/:id/extras",
+    {
+      onRequest: sesion,
+      schema: {
+        params: id,
+        body: z.object({
+          aprobar: z.boolean(),
+          minutos: z.number().int().min(1).nullish(),
+          motivo: z.string().trim().max(500).nullish(),
+        }),
+      },
+    },
+    async (req) => ctx.marcaciones.revisarExtras(req.user.id, req.params.id, req.body),
+  );
+
+  r.post(
+    "/extras/aprobar-lote",
+    { onRequest: sesion, schema: { body: z.object({ ids: z.array(z.number().int()).min(1).max(500) }) } },
+    async (req) => ({ aprobadas: await ctx.marcaciones.aprobarExtrasEnLote(req.user.id, req.body.ids) }),
+  );
+
+  r.get(
+    "/offline",
+    { onRequest: sesion, schema: { querystring: z.object({ estado: z.enum(["APLICADA", "RECHAZADA", "RESUELTA"]).default("RECHAZADA") }) } },
+    async (req) => ({
+      datos: await db
+        .select({
+          id: marcasOffline.id,
+          codigo: marcasOffline.codigo,
+          capturadoEn: marcasOffline.capturadoEn,
+          recibidoEn: marcasOffline.recibidoEn,
+          desfaseSegundos: marcasOffline.desfaseSegundos,
+          dispositivo: marcasOffline.dispositivo,
+          estado: marcasOffline.estado,
+          mensaje: marcasOffline.mensaje,
+          notaResolucion: marcasOffline.notaResolucion,
+          empleado: sql<string | null>`${empleados.nombre} || ' ' || ${empleados.apellido}`,
+          empleadoId: empleados.id,
+        })
+        .from(marcasOffline)
+        .leftJoin(empleados, eq(empleados.identificacion, marcasOffline.codigo))
+        .where(eq(marcasOffline.estado, req.query.estado))
+        .orderBy(desc(marcasOffline.capturadoEn))
+        .limit(200),
+    }),
+  );
+
+  r.post(
+    "/offline/:id/resolver",
+    {
+      onRequest: sesion,
+      schema: { params: z.object({ id: z.string().uuid() }), body: z.object({ nota: z.string().trim().min(5, "Explica cómo se resolvió").max(500) }) },
+    },
+    async (req) => ctx.offline.resolver(req.user.id, req.params.id, req.body.nota),
   );
 
   r.post(

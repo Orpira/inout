@@ -1,4 +1,4 @@
-import { CATEGORIAS } from "@inout/core";
+import { CATEGORIAS, type Descanso, type DiaHorario } from "@inout/core";
 import { sql } from "drizzle-orm";
 import {
   boolean,
@@ -14,6 +14,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 
 export const rolEnum = pgEnum("rol", ["ADMIN", "SUPERVISOR"]);
@@ -31,6 +32,15 @@ export const origenMarcacionEnum = pgEnum("origen_marcacion", [
 ]);
 export const tipoAjusteFestivoEnum = pgEnum("tipo_ajuste_festivo", ["AGREGAR", "QUITAR"]);
 export const categoriaHoraEnum = pgEnum("categoria_hora", CATEGORIAS);
+export const tipoHorarioEnum = pgEnum("tipo_horario", ["FIJO", "TURNOS"]);
+export const estadoExtrasEnum = pgEnum("estado_extras", [
+  "SIN_EXTRAS",
+  "TOLERANCIA",
+  "PENDIENTE",
+  "APROBADAS",
+  "RECHAZADAS",
+  "AUTOMATICAS",
+]);
 
 const tiempos = {
   creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
@@ -55,6 +65,19 @@ export const usuarios = pgTable(
   (t) => [uniqueIndex("usuarios_email_uq").on(sql`lower(${t.email})`)],
 );
 
+export const horarios = pgTable("horarios", {
+  id: serial("id").primaryKey(),
+  nombre: text("nombre").notNull(),
+  tipo: tipoHorarioEnum("tipo").notNull(),
+  /** 7 elementos, índice 0 = domingo. */
+  dias: jsonb("dias").$type<DiaHorario[]>().notNull(),
+  descanso: jsonb("descanso").$type<Descanso | null>(),
+  toleranciaMinutos: integer("tolerancia_minutos").notNull().default(0),
+  requiereAprobacion: boolean("requiere_aprobacion").notNull().default(false),
+  activo: boolean("activo").notNull().default(true),
+  ...tiempos,
+});
+
 export const empleados = pgTable(
   "empleados",
   {
@@ -66,8 +89,8 @@ export const empleados = pgTable(
     email: text("email"),
     telefono: text("telefono"),
     salario: numeric("salario", { precision: 14, scale: 2, mode: "number" }).notNull().default(0),
-    /** Jornada ordinaria diaria pactada en minutos. NULL = jornada legal vigente / 6. */
-    minutosJornadaDia: integer("minutos_jornada_dia"),
+    /** Horario asignado. NULL = jornada legal en 6 días (lunes a sábado). */
+    horarioId: integer("horario_id").references(() => horarios.id, { onDelete: "restrict" }),
     fechaIngreso: date("fecha_ingreso"),
     activo: boolean("activo").notNull().default(true),
     ...tiempos,
@@ -75,10 +98,6 @@ export const empleados = pgTable(
   (t) => [
     uniqueIndex("empleados_identificacion_uq").on(t.identificacion),
     check("empleados_salario_ck", sql`${t.salario} >= 0`),
-    check(
-      "empleados_jornada_ck",
-      sql`${t.minutosJornadaDia} IS NULL OR (${t.minutosJornadaDia} BETWEEN 60 AND 720)`,
-    ),
   ],
 );
 
@@ -95,7 +114,16 @@ export const marcaciones = pgTable(
     origen: origenMarcacionEnum("origen").notNull().default("KIOSKO"),
     observacion: text("observacion"),
     minutosTotales: integer("minutos_totales"),
+    /** Extras liquidadas (reconocidas). */
     minutosExtra: integer("minutos_extra"),
+    /** Extras resultantes de las marcaciones, antes de aprobación o tolerancia. */
+    minutosExtraCalculados: integer("minutos_extra_calculados"),
+    minutosDescanso: integer("minutos_descanso"),
+    estadoExtras: estadoExtrasEnum("estado_extras"),
+    /** Minutos extra aprobados por el supervisor (0 = rechazadas). */
+    minutosExtraAprobados: integer("minutos_extra_aprobados"),
+    extrasRevisadasPor: integer("extras_revisadas_por").references(() => usuarios.id, { onDelete: "set null" }),
+    extrasRevisadasEn: timestamp("extras_revisadas_en", { withTimezone: true }),
     valorRecargos: numeric("valor_recargos", { precision: 14, scale: 2, mode: "number" }),
     alertas: jsonb("alertas").$type<string[]>().notNull().default([]),
     creadoPor: integer("creado_por").references(() => usuarios.id, { onDelete: "set null" }),
@@ -105,6 +133,7 @@ export const marcaciones = pgTable(
     index("marcaciones_empleado_entrada_idx").on(t.empleadoId, t.entrada),
     index("marcaciones_entrada_idx").on(t.entrada),
     index("marcaciones_estado_idx").on(t.estado),
+    index("marcaciones_estado_extras_idx").on(t.estadoExtras),
     // Un empleado solo puede tener una marcación abierta a la vez.
     uniqueIndex("marcaciones_una_abierta_uq")
       .on(t.empleadoId)
@@ -152,6 +181,38 @@ export const festivosAjustes = pgTable("festivos_ajustes", {
   creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const estadoMarcaOfflineEnum = pgEnum("estado_marca_offline", ["APLICADA", "RECHAZADA", "RESUELTA"]);
+
+/**
+ * Marcaciones capturadas por el kiosko sin conexión y enviadas al reconectar.
+ * El id lo genera el dispositivo: reenviar la misma marca no la duplica.
+ * Las rechazadas quedan aquí para que un supervisor las resuelva.
+ */
+export const marcasOffline = pgTable(
+  "marcas_offline",
+  {
+    id: uuid("id").primaryKey(),
+    codigo: text("codigo").notNull(),
+    /** Hora de captura corregida con el desfase del reloj del dispositivo. */
+    capturadoEn: timestamp("capturado_en", { withTimezone: true }).notNull(),
+    /** Hora de captura según el reloj del dispositivo. */
+    capturadoDispositivo: timestamp("capturado_dispositivo", { withTimezone: true }).notNull(),
+    desfaseSegundos: integer("desfase_segundos").notNull().default(0),
+    dispositivo: text("dispositivo"),
+    recibidoEn: timestamp("recibido_en", { withTimezone: true }).notNull().defaultNow(),
+    estado: estadoMarcaOfflineEnum("estado").notNull(),
+    tipo: text("tipo"),
+    mensaje: text("mensaje"),
+    empleadoId: integer("empleado_id").references(() => empleados.id, { onDelete: "set null" }),
+    marcacionId: integer("marcacion_id").references(() => marcaciones.id, { onDelete: "set null" }),
+    resueltaPor: integer("resuelta_por").references(() => usuarios.id, { onDelete: "set null" }),
+    resueltaEn: timestamp("resuelta_en", { withTimezone: true }),
+    notaResolucion: text("nota_resolucion"),
+  },
+  (t) => [index("marcas_offline_estado_idx").on(t.estado, t.capturadoEn)],
+);
+
 export type Usuario = typeof usuarios.$inferSelect;
 export type Empleado = typeof empleados.$inferSelect;
 export type Marcacion = typeof marcaciones.$inferSelect;
+export type HorarioFila = typeof horarios.$inferSelect;

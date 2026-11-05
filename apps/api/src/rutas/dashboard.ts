@@ -1,6 +1,6 @@
 import { desdeLocal, fechaLocal, parametrosVigentes, sumarDias } from "@inout/core";
 import { and, count, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
-import { empleados, marcaciones } from "../db/schema.js";
+import { empleados, marcaciones, marcasOffline } from "../db/schema.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
 import { columnasMarcacion } from "./marcaciones.js";
 
@@ -65,6 +65,13 @@ export const rutasDashboard: Rutas = (app, { db, calendario }) => {
         .limit(8),
       db.select({ n: count() }).from(empleados).where(eq(empleados.activo, true)),
     ]);
+    const [[pendientes], [offline]] = await Promise.all([
+      db
+        .select({ n: count(), minutos: sql<number>`coalesce(sum(${marcaciones.minutosExtraCalculados}),0)::int` })
+        .from(marcaciones)
+        .where(and(eq(marcaciones.estado, "CERRADA"), eq(marcaciones.estadoExtras, "PENDIENTE"))),
+      db.select({ n: count() }).from(marcasOffline).where(eq(marcasOffline.estado, "RECHAZADA")),
+    ]);
 
     const porFecha = new Map(serie.map((s) => [s.fecha, s]));
     const dias = Array.from({ length: 14 }, (_, i) => {
@@ -88,6 +95,8 @@ export const rutasDashboard: Rutas = (app, { db, calendario }) => {
       entradasHoy: hoyStats?.entradas ?? 0,
       empleadosHoy: hoyStats?.empleados ?? 0,
       enRevision: revision?.n ?? 0,
+      extrasPendientes: { marcaciones: pendientes?.n ?? 0, minutos: pendientes?.minutos ?? 0 },
+      offlineRechazadas: offline?.n ?? 0,
       mes: { minutosExtra: mes?.minutosExtra ?? 0, valor: mes?.valor ?? 0, turnos: mes?.turnos ?? 0 },
       serie: dias,
       topExtras: top,

@@ -7,12 +7,17 @@ import { Cargando, ProveedorAvisos } from "./componentes/ui";
 import { ErrorApi } from "./lib/api";
 import { ProveedorSesion } from "./lib/sesion";
 import "./estilos.css";
+import { registerSW } from "virtual:pwa-register";
+
+// Service worker: guarda la aplicación en el dispositivo para abrirla sin conexión.
+registerSW({ immediate: true });
 
 const Kiosko = lazy(() => import("./paginas/Kiosko"));
 const Login = lazy(() => import("./paginas/Login"));
 const Inicio = lazy(() => import("./paginas/Inicio"));
 const Marcaciones = lazy(() => import("./paginas/Marcaciones"));
 const Empleados = lazy(() => import("./paginas/Empleados"));
+const Horarios = lazy(() => import("./paginas/Horarios"));
 const Liquidacion = lazy(() => import("./paginas/Liquidacion"));
 const Configuracion = lazy(() => import("./paginas/Configuracion"));
 const Usuarios = lazy(() => import("./paginas/Usuarios"));
@@ -44,6 +49,7 @@ createRoot(document.getElementById("root")!).render(
                         <Route index element={<Inicio />} />
                         <Route path="marcaciones" element={<Marcaciones />} />
                         <Route path="empleados" element={<Empleados />} />
+                        <Route path="horarios" element={<Horarios />} />
                         <Route path="liquidacion" element={<Liquidacion />} />
                         <Route path="configuracion" element={<Configuracion />} />
                         <Route path="usuarios" element={<Usuarios />} />
