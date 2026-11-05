@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feat/reconstruccion-ts]
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # La lógica debe dar lo mismo sin importar la zona del servidor.
+        tz: [UTC, Europe/Madrid, America/Bogota]
+    env:
+      TZ: ${{ matrix.tz }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
