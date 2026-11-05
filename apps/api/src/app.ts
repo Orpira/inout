@@ -17,6 +17,7 @@ import { rutasEmpleados } from './rutas/empleados.js';
 import { rutasFestivos } from './rutas/festivos.js';
 import { rutasLiquidacion } from './rutas/liquidacion.js';
 import { rutasMarcaciones } from './rutas/marcaciones.js';
+import { rutasTurnos } from './rutas/turnos.js';
 import { rutasUsuarios } from './rutas/usuarios.js';
 
 const DURACION_SESION_S = 12 * 3600;
@@ -98,6 +99,7 @@ export async function crearApp(db: Db) {
   rutasLiquidacion(app, db);
   rutasFestivos(app, db);
   rutasUsuarios(app, db);
+  rutasTurnos(app, db);
 
   // --- Frontend (producción: un solo proceso y origen) ---
   const webDist = config.WEB_DIST ? resolve(config.WEB_DIST) : undefined;

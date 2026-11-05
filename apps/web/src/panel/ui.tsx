@@ -33,7 +33,7 @@ export const Entrada = (p: InputHTMLAttributes<HTMLInputElement>) => <input clas
 export const Selector = (p: SelectHTMLAttributes<HTMLSelectElement>) => <select className={claseInput} {...p} />;
 
 export function MensajeError({ error }: { error: Error | null | undefined }) {
-  return error ? <p className="rounded bg-rose-50 p-2 text-sm text-rose-700">{error.message}</p> : null;
+  return error ? <p className="whitespace-pre-line rounded bg-rose-50 p-2 text-sm text-rose-700">{error.message}</p> : null;
 }
 
 export function Modal({ titulo, onCerrar, children }: { titulo: string; onCerrar: () => void; children: ReactNode }) {

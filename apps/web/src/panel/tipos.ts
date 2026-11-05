@@ -1,4 +1,4 @@
-import type { Categoria } from '@inout/core';
+import type { Categoria, DiaProgramado } from '@inout/core';
 
 /** Instante tal como lo devuelve la API: ISO + fecha/hora ya en Colombia. */
 export interface Momento {
@@ -22,6 +22,8 @@ export interface Empleado {
   nombre: string;
   salarioMensual: number;
   jornadaPactadaMin: number | null;
+  /** 0 = domingo … 6 = sábado. */
+  diaDescanso: number;
   activo: boolean;
 }
 
@@ -49,6 +51,13 @@ export interface DiaLiquidado {
   extrasMin: number;
   valorAdicional: number;
   alertaExtrasDia: boolean;
+  jornadaDiariaMin: number;
+  origenJornada: 'TURNO' | 'DESCANSO' | 'PACTADA' | 'LEGAL';
+  programado: DiaProgramado | null;
+  tardanzaMin: number;
+  salidaAnticipadaMin: number;
+  ausente: boolean;
+  descansoPresuntoMin: number;
 }
 
 export interface LiquidacionEmpleado {
@@ -58,8 +67,28 @@ export interface LiquidacionEmpleado {
   extrasMin: number;
   valorAdicional: number;
   pendientes: number;
+  cumplimiento: { ausencias: string[]; tardanzas: number; tardanzaMin: number; salidasAnticipadas: number; trabajoEnDescanso: string[] };
   alertas: { dias: string[]; semanas: string[] };
   dias: DiaLiquidado[];
+}
+
+export interface TurnoCatalogo {
+  id: number;
+  nombre: string;
+  horaInicio: string;
+  horaFin: string;
+  descansoInicio: string | null;
+  descansoFin: string | null;
+  activo: boolean;
+}
+
+/** Fila de programación: sin horas = día de descanso. */
+export interface FilaProgramacion {
+  empleadoId: number;
+  fecha: string;
+  turnoId: number | null;
+  horaInicio: string | null;
+  horaFin: string | null;
 }
 
 export interface Festivo {

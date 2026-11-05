@@ -5,6 +5,7 @@ import { Empleados } from './panel/Empleados';
 import { Festivos } from './panel/Festivos';
 import { Liquidacion } from './panel/Liquidacion';
 import { Marcaciones, Revision } from './panel/Marcaciones';
+import { Turnos } from './panel/Turnos';
 import { Usuarios } from './panel/Usuarios';
 
 function Login() {
@@ -54,6 +55,7 @@ export function Panel() {
 const PESTANAS = [
   { id: 'revision', titulo: 'Revisión', soloAdmin: false },
   { id: 'marcaciones', titulo: 'Marcaciones', soloAdmin: false },
+  { id: 'turnos', titulo: 'Turnos', soloAdmin: false },
   { id: 'liquidacion', titulo: 'Liquidación', soloAdmin: false },
   { id: 'empleados', titulo: 'Empleados', soloAdmin: true },
   { id: 'festivos', titulo: 'Festivos', soloAdmin: false },
@@ -103,6 +105,7 @@ function Principal({ sesion, onSalir }: { sesion: Sesion; onSalir: () => void })
       </nav>
       {activa === 'revision' && <Revision />}
       {activa === 'marcaciones' && <Marcaciones />}
+      {activa === 'turnos' && <Turnos esAdmin={esAdmin} />}
       {activa === 'liquidacion' && <Liquidacion />}
       {activa === 'empleados' && esAdmin && <Empleados />}
       {activa === 'festivos' && <Festivos puedeEditar={esAdmin} />}

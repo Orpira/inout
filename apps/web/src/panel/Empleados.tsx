@@ -2,7 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { api } from '../api';
 import type { Empleado } from './tipos';
-import { Boton, Campo, Entrada, MensajeError, Modal, Tabla, Vacio, horas, pesos } from './ui';
+import { Boton, Campo, Entrada, MensajeError, Modal, Selector, Tabla, Vacio, horas, pesos } from './ui';
+
+export const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 function FormEmpleado({ empleado, onCerrar }: { empleado?: Empleado; onCerrar: () => void }) {
   const qc = useQueryClient();
@@ -10,6 +12,7 @@ function FormEmpleado({ empleado, onCerrar }: { empleado?: Empleado; onCerrar: (
   const [nombre, setNombre] = useState(empleado?.nombre ?? '');
   const [salario, setSalario] = useState(empleado ? String(empleado.salarioMensual) : '');
   const [jornada, setJornada] = useState(empleado?.jornadaPactadaMin ? String(empleado.jornadaPactadaMin / 60) : '');
+  const [diaDescanso, setDiaDescanso] = useState(empleado?.diaDescanso ?? 0);
   const [activo, setActivo] = useState(empleado?.activo ?? true);
   const [motivo, setMotivo] = useState('');
 
@@ -32,6 +35,7 @@ function FormEmpleado({ empleado, onCerrar }: { empleado?: Empleado; onCerrar: (
       nombre,
       salarioMensual: Number(salario),
       jornadaPactadaMin: jornada ? Math.round(Number(jornada.replace(',', '.')) * 60) : null,
+      diaDescanso,
       activo,
     };
     guardar.mutate(empleado ? { ...datos, motivo } : datos);
@@ -53,7 +57,20 @@ function FormEmpleado({ empleado, onCerrar }: { empleado?: Empleado; onCerrar: (
           <Campo etiqueta="Jornada diaria pactada (h)">
             <Entrada value={jornada} onChange={(e) => setJornada(e.target.value)} placeholder="Legal ÷ 6" inputMode="decimal" />
           </Campo>
+          <Campo etiqueta="Día de descanso obligatorio">
+            <Selector value={diaDescanso} onChange={(e) => setDiaDescanso(Number(e.target.value))}>
+              {DIAS_SEMANA.map((d, i) => (
+                <option key={d} value={i}>
+                  {d}
+                </option>
+              ))}
+            </Selector>
+          </Campo>
         </div>
+        <p className="text-xs text-slate-500">
+          La jornada pactada solo se usa los días sin turno programado. El recargo dominical se paga en los festivos y en el día de descanso
+          obligatorio: el domingo, salvo pacto escrito de otro día (CST art. 179).
+        </p>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={activo} onChange={(e) => setActivo(e.target.checked)} /> Activo (puede marcar en el kiosko)
         </label>
@@ -94,6 +111,7 @@ export function Empleados() {
                 <th>Nombre</th>
                 <th>Salario</th>
                 <th>Jornada diaria</th>
+                <th>Descanso</th>
                 <th>Estado</th>
                 <th />
               </tr>
@@ -105,6 +123,7 @@ export function Empleados() {
                   <td>{e.nombre}</td>
                   <td className="tabular-nums">{pesos(e.salarioMensual)}</td>
                   <td>{e.jornadaPactadaMin ? `${horas(e.jornadaPactadaMin)} pactada` : 'Legal'}</td>
+                  <td>{DIAS_SEMANA[e.diaDescanso]}</td>
                   <td>{e.activo ? 'Activo' : 'Inactivo'}</td>
                   <td className="text-right">
                     <Boton onClick={() => setEditando(e)}>Editar</Boton>

@@ -12,6 +12,8 @@ const zDatos = z.object({
   salarioMensual: z.number().int().positive(),
   /** Minutos diarios pactados; null = jornada legal ÷ 6. */
   jornadaPactadaMin: z.number().int().min(60).max(600).nullable(),
+  /** 0 = domingo … 6 = sábado. Distinto de domingo solo con pacto escrito (CST art. 179). */
+  diaDescanso: z.number().int().min(0).max(6),
   activo: z.boolean(),
 });
 

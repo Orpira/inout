@@ -7,6 +7,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -44,6 +45,8 @@ export const empleados = pgTable('empleados', {
   salarioMensual: integer('salario_mensual').notNull(),
   /** Jornada diaria pactada en minutos; null = jornada legal ÷ 6. */
   jornadaPactadaMin: integer('jornada_pactada_min'),
+  /** Día de descanso obligatorio: 0 = domingo … 6 = sábado (CST art. 179, pacto escrito si no es domingo). */
+  diaDescanso: integer('dia_descanso').notNull().default(0),
   activo: boolean('activo').notNull().default(true),
   creadoEn: instante('creado_en').notNull().defaultNow(),
 });
@@ -86,3 +89,37 @@ export const ajustesFestivos = pgTable('ajustes_festivos', {
   tipo: tipoAjusteFestivo('tipo').notNull(),
   nombre: text('nombre'),
 });
+
+/** Catálogo de turnos. Horas en Colombia 'HH:MM'; fin <= inicio = termina al día siguiente. */
+export const turnos = pgTable('turnos', {
+  id: serial('id').primaryKey(),
+  nombre: text('nombre').notNull().unique(),
+  horaInicio: text('hora_inicio').notNull(),
+  horaFin: text('hora_fin').notNull(),
+  descansoInicio: text('descanso_inicio'),
+  descansoFin: text('descanso_fin'),
+  activo: boolean('activo').notNull().default(true),
+  creadoEn: instante('creado_en').notNull().defaultNow(),
+});
+
+/**
+ * Programación: un registro por empleado y día. Copia el horario del turno
+ * (cambiar el catálogo no altera lo ya programado ni las liquidaciones).
+ * Sin turno ni horas = día de descanso programado.
+ */
+export const programacion = pgTable(
+  'programacion',
+  {
+    empleadoId: integer('empleado_id')
+      .notNull()
+      .references(() => empleados.id),
+    fecha: date('fecha', { mode: 'string' }).notNull(),
+    turnoId: integer('turno_id').references(() => turnos.id),
+    horaInicio: text('hora_inicio'),
+    horaFin: text('hora_fin'),
+    descansoInicio: text('descanso_inicio'),
+    descansoFin: text('descanso_fin'),
+    actualizadoEn: instante('actualizado_en').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.empleadoId, t.fecha] }), index('programacion_fecha').on(t.fecha)],
+);

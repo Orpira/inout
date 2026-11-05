@@ -2,7 +2,7 @@ import { CATEGORIAS, type Categoria } from '@inout/core';
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useState } from 'react';
 import { api } from '../api';
-import type { LiquidacionEmpleado } from './tipos';
+import type { DiaLiquidado, LiquidacionEmpleado } from './tipos';
 import { Boton, Campo, Entrada, MensajeError, Tabla, Vacio, horas, hoyColombia, pesos } from './ui';
 
 export const ETIQUETAS: Record<Categoria, string> = {
@@ -16,6 +16,25 @@ export const ETIQUETAS: Record<Categoria, string> = {
   extraNocturnaDominical: 'Extra nocturna dom./fest.',
 };
 
+/** Jornada que se aplicó en el día y de dónde sale. */
+function textoJornada(d: DiaLiquidado) {
+  const p = d.programado;
+  if (p?.tipo === 'TURNO') return `Turno ${p.horaInicio}–${p.horaFin} · ${horas(d.jornadaDiariaMin)}`;
+  if (p?.tipo === 'DESCANSO') return 'Descanso programado · 0:00';
+  return `${d.origenJornada === 'PACTADA' ? 'Pactada' : 'Legal'} · ${horas(d.jornadaDiariaMin)}`;
+}
+
+function avisosDia(d: DiaLiquidado) {
+  const a: { texto: string; color: string }[] = [];
+  if (d.ausente) a.push({ texto: 'Ausente', color: 'text-rose-700' });
+  if (d.tardanzaMin > 0) a.push({ texto: `Llegó ${horas(d.tardanzaMin)} tarde`, color: 'text-amber-700' });
+  if (d.salidaAnticipadaMin > 0) a.push({ texto: `Salió ${horas(d.salidaAnticipadaMin)} antes`, color: 'text-amber-700' });
+  if (d.programado?.tipo === 'DESCANSO' && d.totalMin > 0) a.push({ texto: 'Trabajó en día de descanso', color: 'text-rose-700' });
+  if (d.descansoPresuntoMin > 0) a.push({ texto: `Pausa no marcada: ${horas(d.descansoPresuntoMin)} descontada`, color: 'text-slate-500' });
+  if (d.alertaExtrasDia) a.push({ texto: '> 2 h extra', color: 'text-rose-700' });
+  return a;
+}
+
 /** Primera o segunda quincena del mes actual en Colombia. */
 function quincenaActual(): [string, string] {
   const hoy = hoyColombia();
@@ -26,7 +45,18 @@ function quincenaActual(): [string, string] {
 }
 
 function descargarCsv(desde: string, hasta: string, filas: LiquidacionEmpleado[]) {
-  const cab = ['Documento', 'Empleado', ...CATEGORIAS.map((c) => `${ETIQUETAS[c]} (h)`), 'Total (h)', 'Extras (h)', 'Valor adicional', 'Pendientes'];
+  const cab = [
+    'Documento',
+    'Empleado',
+    ...CATEGORIAS.map((c) => `${ETIQUETAS[c]} (h)`),
+    'Total (h)',
+    'Extras (h)',
+    'Valor adicional',
+    'Pendientes',
+    'Ausencias',
+    'Tardanzas',
+    'Minutos tarde',
+  ];
   const h = (min: number) => (min / 60).toFixed(2).replace('.', ',');
   const lineas = filas.map((r) => [
     r.empleado.documento,
@@ -36,6 +66,9 @@ function descargarCsv(desde: string, hasta: string, filas: LiquidacionEmpleado[]
     h(r.extrasMin),
     String(r.valorAdicional),
     String(r.pendientes),
+    String(r.cumplimiento.ausencias.length),
+    String(r.cumplimiento.tardanzas),
+    String(r.cumplimiento.tardanzaMin),
   ]);
   // Separador ';' y BOM: Excel en español lo abre bien.
   const csv = '﻿' + [cab, ...lineas].map((l) => l.map((v) => `"${v.replaceAll('"', '""')}"`).join(';')).join('\r\n');
@@ -73,7 +106,8 @@ export function Liquidacion() {
       </div>
       <p className="text-xs text-slate-500">
         Horas en h:mm. El valor adicional es lo que se paga además del salario básico (recargos y extras), calculado con el salario actual
-        de cada empleado y las normas vigentes en cada fecha. Los turnos abiertos o en revisión no se liquidan hasta corregirlos.
+        de cada empleado y las normas vigentes en cada fecha. La jornada de cada día es la del turno programado; sin turno, la pactada o la
+        legal ÷ 6. Lo que exceda esa jornada es extra. Los turnos abiertos o en revisión no se liquidan hasta corregirlos.
       </p>
       <MensajeError error={q.error} />
       {q.data &&
@@ -82,6 +116,7 @@ export function Liquidacion() {
             <thead>
               <tr>
                 <th>Empleado</th>
+                <th>Jornada</th>
                 {usadas.map((c) => (
                   <th key={c}>{ETIQUETAS[c]}</th>
                 ))}
@@ -98,6 +133,7 @@ export function Liquidacion() {
                       <span className="mr-1 text-slate-400">{abierto === r.empleado.id ? '▾' : '▸'}</span>
                       {r.empleado.nombre}
                     </td>
+                    <td />
                     {usadas.map((c) => (
                       <td key={c} className="tabular-nums">
                         {horas(r.totales[c])}
@@ -107,6 +143,15 @@ export function Liquidacion() {
                     <td className="tabular-nums font-medium">{pesos(r.valorAdicional)}</td>
                     <td className="text-xs">
                       {r.pendientes > 0 && <div className="text-amber-700">{r.pendientes} sin cerrar</div>}
+                      {r.cumplimiento.ausencias.length > 0 && <div className="text-rose-700">{r.cumplimiento.ausencias.length} ausencia(s)</div>}
+                      {r.cumplimiento.tardanzas > 0 && (
+                        <div className="text-amber-700">
+                          {r.cumplimiento.tardanzas} tardanza(s) · {horas(r.cumplimiento.tardanzaMin)}
+                        </div>
+                      )}
+                      {r.cumplimiento.trabajoEnDescanso.length > 0 && (
+                        <div className="text-rose-700">Trabajó {r.cumplimiento.trabajoEnDescanso.length} día(s) de descanso</div>
+                      )}
                       {r.alertas.dias.length > 0 && <div className="text-rose-700">&gt; 2 h extra: {r.alertas.dias.length} día(s)</div>}
                       {r.alertas.semanas.length > 0 && <div className="text-rose-700">&gt; 12 h extra/semana</div>}
                     </td>
@@ -115,6 +160,7 @@ export function Liquidacion() {
                     r.dias.map((d) => (
                       <tr key={d.fecha} className="bg-slate-50 text-xs text-slate-600">
                         <td className="pl-8">{d.fecha}</td>
+                        <td className="whitespace-nowrap">{textoJornada(d)}</td>
                         {usadas.map((c) => (
                           <td key={c} className="tabular-nums">
                             {horas(d.minutos[c])}
@@ -122,7 +168,13 @@ export function Liquidacion() {
                         ))}
                         <td className="tabular-nums">{horas(d.totalMin)}</td>
                         <td className="tabular-nums">{pesos(d.valorAdicional)}</td>
-                        <td>{d.alertaExtrasDia && <span className="text-rose-700">&gt; 2 h extra</span>}</td>
+                        <td>
+                          {avisosDia(d).map((a) => (
+                            <div key={a.texto} className={a.color}>
+                              {a.texto}
+                            </div>
+                          ))}
+                        </td>
                       </tr>
                     ))}
                 </Fragment>
