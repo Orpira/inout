@@ -30,6 +30,7 @@ npm install
 npm run db:up                     # Postgres 16 en Docker (localhost:5432)
 npm run dev                       # API en :3000 (aplica migraciones) + web en :5173
 npm run crear-admin -w @inout/api -- admin@empresa.co "Nombre" "clave-larga"
+npm run sembrar-pruebas -w @inout/api   # empleados ficticios 1001…1006 (no corre en producción)
 ```
 
 Abrir http://localhost:5173 (panel) y http://localhost:5173/kiosko. `npm run dev:api` y `npm run dev:web` arrancan cada parte por separado.
@@ -58,6 +59,8 @@ Un solo proceso en el puerto 3000 sirve la API y el frontend. Las migraciones se
 Cada cambio queda en la tabla `auditoria` con el usuario, el motivo y los valores antes y después. Las fechas y horas del panel se escriben y se muestran en hora de Colombia.
 
 ## Migración desde Laravel
+
+> **Decisión (nov-2026): no se migran los datos de Laravel.** InOut 2 arranca con registros desde cero. El script queda por si algún día hiciera falta consultar el histórico.
 
 Laravel guardaba `registros_horarios.entrada/salida` como `timestamp` **sin zona**, en la zona de `config('app.timezone')`:
 
@@ -89,7 +92,6 @@ Datos que Laravel inventaba y cómo se migran (todos quedan en la auditoría con
 
 ## Pendiente
 
-- Ejecutar `--analizar` sobre la base real de Laravel y fijar las zonas y la fecha del despliegue de `372b7dd`.
 - Confirmar si el festivo del 9 de julio (Ley 2578/2026) se traslada al lunes.
 - Supuestos a validar con nómina: recargo en todo domingo; recálculos con el salario actual.
 - El kiosko no exige sesión. Si se expone fuera de la red local, hay que restringirlo (por IP o con un token de dispositivo).

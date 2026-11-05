@@ -12,7 +12,8 @@
     "db:migrate": "drizzle-kit migrate",
     "crear-admin": "tsx --env-file-if-exists=../../.env src/scripts/crear-admin.ts",
     "test": "vitest run",
-    "migrar-laravel": "tsx --env-file-if-exists=../../.env src/scripts/migrar-laravel.ts"
+    "migrar-laravel": "tsx --env-file-if-exists=../../.env src/scripts/migrar-laravel.ts",
+    "sembrar-pruebas": "tsx --env-file-if-exists=../../.env src/scripts/sembrar-pruebas.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
