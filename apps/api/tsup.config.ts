@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/scripts/crear-admin.ts'],
+  entry: ['src/index.ts', 'src/scripts/crear-admin.ts', 'src/scripts/migrar-laravel.ts'],
   format: 'esm',
   target: 'node22',
   platform: 'node',

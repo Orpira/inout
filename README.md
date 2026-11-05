@@ -57,9 +57,39 @@ Un solo proceso en el puerto 3000 sirve la API y el frontend. Las migraciones se
 
 Cada cambio queda en la tabla `auditoria` con el usuario, el motivo y los valores antes y después. Las fechas y horas del panel se escriben y se muestran en hora de Colombia.
 
+## Migración desde Laravel
+
+Laravel guardaba `registros_horarios.entrada/salida` como `timestamp` **sin zona**, en la zona de `config('app.timezone')`:
+
+| Periodo | Zona en que están guardadas las horas |
+| --- | --- |
+| Hasta el despliegue del commit `372b7dd` (6-abr-2026) | `APP_TIMEZONE` del `.env` de producción (por defecto `UTC`) |
+| Desde ese despliegue | `Europe/Madrid` (fijo en `config/app.php`) |
+
+Nunca se usó la hora de Colombia de forma explícita. Para saber qué zona aplicar a cada periodo, el script analiza los datos:
+
+```bash
+cd apps/api
+# 1. Ver a qué hora de Colombia caerían las entradas con cada zona posible.
+npm run migrar-laravel -- --origen postgres://usuario:clave@host/laravel --analizar
+# 2. Simular (no escribe) con las zonas elegidas. La fecha del cambio es la del despliegue real.
+npm run migrar-laravel -- --origen … --tz UTC --tz-desde 2026-04-06=Europe/Madrid
+# 3. Migrar sobre una base InOut 2 vacía (DATABASE_URL).
+npm run migrar-laravel -- --origen … --tz UTC --tz-desde 2026-04-06=Europe/Madrid --ejecutar
+```
+
+Datos que Laravel inventaba y cómo se migran (todos quedan en la auditoría con los valores originales):
+
+- *«Salida asignada automaticamente»* (18:00 del día en que corría el comando): se descarta la salida y la marcación queda en **REVISION**.
+- *«Entrada asignada automaticamente»* o *«entrada nula»* (1 h antes de la salida): queda en **REVISION** con la salida real.
+- Registros editados después por un usuario (*«Cambios realizados…»*): se respetan como **CERRADA**.
+- Sin salida: el último, si tiene menos de `MAX_HORAS_TURNO`, queda **ABIERTA**; el resto, **REVISION**.
+- Empleados sin identificación reciben documento provisional `L<id>`; sin salario, `1` (hay que corregirlo antes de liquidar). La jornada pactada no se migra (Laravel guardaba 44 h por defecto): se aplica la legal vigente.
+- La tabla antigua `registros` no se migra; el análisis informa cuántas filas tiene.
+
 ## Pendiente
 
-- Migración de datos desde Laravel. Antes hay que confirmar si las horas se guardaban en hora de Colombia o en UTC.
+- Ejecutar `--analizar` sobre la base real de Laravel y fijar las zonas y la fecha del despliegue de `372b7dd`.
 - Confirmar si el festivo del 9 de julio (Ley 2578/2026) se traslada al lunes.
 - Supuestos a validar con nómina: recargo en todo domingo; recálculos con el salario actual.
 - El kiosko no exige sesión. Si se expone fuera de la red local, hay que restringirlo (por IP o con un token de dispositivo).
