@@ -70,7 +70,7 @@ Es extra lo que excede la jornada ordinaria pactada y, en todo caso, la máxima 
 | Empleado sin horario fijo | La jornada pactada del empleado o, si no tiene, la legal ÷ 6 |
 
 - **Qué minutos son extra:** primero cuentan como ordinarios los trabajados dentro del horario del turno. Si el empleado llegó tarde o salió antes, los minutos de fuera del horario completan la jornada y solo el resto es extra. Así, quien llega 1 h tarde y sale 1 h tarde no genera extras, pero queda la tardanza.
-- **Descanso intermedio:** si el turno lo tiene y el empleado no marca la pausa, se presume tomada en su horario y no se cuenta.
+- **Descanso intermedio (almuerzo):** los empleados no lo marcan. Si el turno lo tiene, se presume tomado en su horario y no se cuenta; si alguien sí marca una pausa de al menos esa duración, se respeta lo marcado. Un almuerzo pagado se modela con un turno sin descanso.
 - **Ausencias:** un día con turno, ya terminado y sin marcaciones. Un festivo no trabajado no es ausencia (descanso legal); si se trabaja, las horas del turno llevan recargo festivo.
 - **Turnos nocturnos:** una marcación que empieza pasada la medianoche pertenece al turno programado del día anterior si se solapa con él.
 - **Recargo dominical:** en festivos y en el día de descanso obligatorio del empleado, que es el domingo salvo pacto escrito de otro día (CST art. 179, mod. Ley 2466/2025).

@@ -30,7 +30,7 @@ function avisosDia(d: DiaLiquidado) {
   if (d.tardanzaMin > 0) a.push({ texto: `Llegó ${horas(d.tardanzaMin)} tarde`, color: 'text-amber-700' });
   if (d.salidaAnticipadaMin > 0) a.push({ texto: `Salió ${horas(d.salidaAnticipadaMin)} antes`, color: 'text-amber-700' });
   if (d.programado?.tipo === 'DESCANSO' && d.totalMin > 0) a.push({ texto: 'Trabajó en día de descanso', color: 'text-rose-700' });
-  if (d.descansoPresuntoMin > 0) a.push({ texto: `Pausa no marcada: ${horas(d.descansoPresuntoMin)} descontada`, color: 'text-slate-500' });
+  if (d.descansoPresuntoMin > 0) a.push({ texto: `Almuerzo descontado: ${horas(d.descansoPresuntoMin)}`, color: 'text-slate-500' });
   if (d.alertaExtrasDia) a.push({ texto: '> 2 h extra', color: 'text-rose-700' });
   return a;
 }
