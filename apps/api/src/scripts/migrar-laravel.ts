@@ -242,8 +242,28 @@ async function migrar() {
 
 class Simulacion extends Error {}
 
+/** Traduce los errores de conexión al origen a algo accionable. */
+function explicarErrorOrigen(err: unknown): never {
+  const e = err as { code?: string; message?: string };
+  const destino = (() => {
+    try {
+      const u = new URL(args.origen!);
+      return `${u.hostname}:${u.port || 5432}`;
+    } catch {
+      return args.origen!;
+    }
+  })();
+  const pistas: Record<string, string> = {
+    '28P01': `Usuario o clave incorrectos en ${destino}. Ojo: si es 127.0.0.1:5432, ahí responde el Postgres de Docker de InOut 2, no el de Laravel.`,
+    ECONNREFUSED: `No hay ningún PostgreSQL escuchando en ${destino}.`,
+    '3D000': `La base indicada no existe en ${destino}.`,
+    '42P01': 'La base no tiene la tabla registros_horarios: ¿es la base de Laravel?',
+  };
+  salir(`Error con la base de Laravel: ${pistas[e.code ?? ''] ?? e.message}`);
+}
+
 try {
-  if (args.analizar) await analizar();
+  if (args.analizar) await analizar().catch(explicarErrorOrigen);
   else await migrar();
 } finally {
   await origen.end();
