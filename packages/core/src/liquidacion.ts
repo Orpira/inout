@@ -26,6 +26,9 @@ import { type FechaLocal, diaSemanaDeFecha, fechaLocal, lunesDeSemana, minutoDel
  * en orden cronológico, y solo el resto es extra. Sin turno, simplemente los
  * primeros minutos del día son ordinarios.
  *
+ * Festivos: si el turno cae en festivo y se trabaja, las horas del turno son
+ * ordinarias con recargo; si no se trabaja, no es ausencia.
+ *
  * Descanso intermedio: si el turno lo tiene y el empleado no marcó ninguna
  * pausa de al menos esa duración, se presume tomado en su horario y esos
  * minutos no se cuentan.
@@ -155,8 +158,10 @@ export function liquidar(turnos: Turno[], opciones: OpcionesLiquidacion = {}): L
     trabajados.set(fecha, set);
   }
 
-  // Días programados con turno ya terminado y sin trabajo: ausencias.
-  for (const [fecha, v] of ventanas) if (!trabajados.has(fecha) && v.fin <= ahora) trabajados.set(fecha, new Set());
+  // Días programados con turno ya terminado y sin trabajo: ausencias. Un
+  // festivo no trabajado es descanso legal (CST art. 177), no ausencia.
+  for (const [fecha, v] of ventanas)
+    if (!trabajados.has(fecha) && v.fin <= ahora && !calendario.esFestivo(fecha)) trabajados.set(fecha, new Set());
 
   // 2. Clasificación de cada día.
   const dias: ResumenDia[] = [];

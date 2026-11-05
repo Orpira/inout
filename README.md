@@ -51,7 +51,7 @@ Un solo proceso en el puerto 3000 sirve la API y el frontend. Las migraciones se
 | --- | --- | --- |
 | Revisión | Todos | Turnos sin salida que superaron `MAX_HORAS_TURNO`. Se corrigen escribiendo la salida o se anulan. |
 | Marcaciones | Todos | Consulta por periodo, empleado y estado. Correcciones y altas manuales con motivo e historial. |
-| Turnos | Todos (catálogo: Admin) | Programación semanal por empleado (turno, descanso o sin programar) con validación legal, y catálogo de turnos. |
+| Turnos | Todos (editar: Admin) | Catálogo de turnos y horario fijo de cada empleado (turno por día de la semana), con fecha de vigencia e historial. |
 | Liquidación | Todos | Horas por categoría, jornada aplicada cada día, cumplimiento (ausencias, tardanzas, salidas anticipadas), valor adicional, alertas de extras y exportación CSV (separador `;`, abre en Excel). |
 | Empleados | Admin | Alta y edición: salario, jornada pactada y día de descanso obligatorio. Los cambios exigen motivo. |
 | Festivos | Todos (editar: Admin) | Calendario de ley por año. Se puede quitar, restaurar o agregar un festivo, con motivo. |
@@ -61,20 +61,23 @@ Cada cambio queda en la tabla `auditoria` con el usuario, el motivo y los valore
 
 ## Turnos y jornada
 
-Es extra lo que excede la jornada ordinaria pactada y, en todo caso, la máxima legal (CST art. 159). La jornada de cada día sale de:
+Es extra lo que excede la jornada ordinaria pactada y, en todo caso, la máxima legal (CST art. 159). Los turnos son fijos: a cada empleado se le asigna una vez un **horario fijo** (qué turno hace cada día de la semana, o si descansa) y solo se cambia ocasionalmente, indicando desde qué fecha rige. Las versiones anteriores se conservan, así que un cambio no altera liquidaciones pasadas. La jornada de cada día sale de:
 
-| Día | Jornada ordinaria |
+| Día según el horario fijo | Jornada ordinaria |
 | --- | --- |
-| Con turno programado | Las horas del turno, sin el descanso intermedio |
-| Descanso programado | 0: todo lo trabajado es extra |
-| Sin programar | La jornada pactada del empleado o, si no tiene, la legal ÷ 6 |
+| Con turno | Las horas del turno, sin el descanso intermedio |
+| Descanso | 0: todo lo trabajado es extra |
+| Empleado sin horario fijo | La jornada pactada del empleado o, si no tiene, la legal ÷ 6 |
 
 - **Qué minutos son extra:** primero cuentan como ordinarios los trabajados dentro del horario del turno. Si el empleado llegó tarde o salió antes, los minutos de fuera del horario completan la jornada y solo el resto es extra. Así, quien llega 1 h tarde y sale 1 h tarde no genera extras, pero queda la tardanza.
 - **Descanso intermedio:** si el turno lo tiene y el empleado no marca la pausa, se presume tomada en su horario y no se cuenta.
+- **Ausencias:** un día con turno, ya terminado y sin marcaciones. Un festivo no trabajado no es ausencia (descanso legal); si se trabaja, las horas del turno llevan recargo festivo.
 - **Turnos nocturnos:** una marcación que empieza pasada la medianoche pertenece al turno programado del día anterior si se solapa con él.
 - **Recargo dominical:** en festivos y en el día de descanso obligatorio del empleado, que es el domingo salvo pacto escrito de otro día (CST art. 179, mod. Ley 2466/2025).
-- **Validación al programar** (CST art. 161, mod. Ley 2101/2021 y Ley 2466/2025): no más horas ordinarias por semana que la jornada máxima vigente (42 h desde el 15-jul-2026), al menos un día de descanso, máximo 9 h ordinarias por día. Más de 8 h en un día solo se avisa: exige pacto escrito de jornada flexible (lit. a).
-- La programación guarda una copia del horario: cambiar el catálogo no altera lo ya programado. Cambiar días pasados exige motivo y queda en la auditoría.
+- **Validación al asignar el horario** (CST art. 161, mod. Ley 2101/2021 y Ley 2466/2025): no más horas ordinarias por semana que la jornada máxima vigente (42 h desde el 15-jul-2026), al menos un día de descanso, máximo 9 h ordinarias por día. Más de 8 h en un día solo se avisa: exige pacto escrito de jornada flexible (lit. a).
+- Si el horario incluye el día de descanso obligatorio del empleado, se avisa: ese día se pagaría con recargo dominical cada semana.
+- El horario guarda una copia de cada turno: cambiar el catálogo no altera horarios ya asignados. Un cambio con fecha pasada exige motivo y todo queda en la auditoría.
+- Vacaciones, incapacidades y permisos todavía no se registran: esos días aparecerán como ausencias.
 
 ## Migración desde Laravel
 

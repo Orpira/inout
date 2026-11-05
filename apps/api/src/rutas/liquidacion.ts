@@ -2,22 +2,22 @@ import {
   CATEGORIAS,
   Calendario,
   type Minutos,
-  type HorarioTurno,
   desdeLocal,
   fechaLocal,
   liquidar,
   lunesDeSemana,
+  programacionEntre,
   sumarDias,
   valorAdicionalDia,
 } from '@inout/core';
-import { and, asc, eq, gte, inArray, lt, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lt } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requiereRol } from '../auth.js';
 import type { Db } from '../db/index.js';
-import { ajustesFestivos, empleados, marcaciones, programacion } from '../db/schema.js';
+import { ajustesFestivos, empleados, horarios, marcaciones } from '../db/schema.js';
 import { validar, zRango } from './comun.js';
-import { horarioDeFila } from './turnos.js';
+import { versionDeFila } from './turnos.js';
 
 export async function cargarCalendario(db: Db) {
   const ajustes = await db.select().from(ajustesFestivos);
@@ -26,8 +26,8 @@ export async function cargarCalendario(db: Db) {
 
 /**
  * Liquidación de un periodo. Se liquidan los turnos CERRADOS cuyo día de
- * jornada cae en el periodo (fechas de Colombia), con la jornada que marque la
- * programación de turnos. Los que siguen ABIERTOS o en REVISION se informan
+ * jornada cae en el periodo (fechas de Colombia), con la jornada que marque el
+ * horario fijo vigente del empleado. Los que siguen ABIERTOS o en REVISION se informan
  * como pendientes y no suman.
  *
  * Se consulta un día de margen a cada lado: un turno nocturno empezado pasada
@@ -57,24 +57,17 @@ export function rutasLiquidacion(app: FastifyInstance, db: Db) {
           lt(marcaciones.entrada, desdeLocal(sumarDias(q.hasta, 2))),
         ),
       );
-    const programadas = await db
-      .select()
-      .from(programacion)
-      .where(
-        and(
-          inArray(programacion.empleadoId, lista.map((e) => e.id)),
-          gte(programacion.fecha, sumarDias(q.desde, -1)),
-          lte(programacion.fecha, sumarDias(q.hasta, 1)),
-        ),
-      );
+    const versiones = await db.select().from(horarios).where(inArray(horarios.empleadoId, lista.map((e) => e.id)));
     const calendario = await cargarCalendario(db);
 
     const resultado = lista.map((emp) => {
       const propias = filas.filter((m) => m.empleadoId === emp.id);
       const cerradas = propias.filter((m) => m.estado === 'CERRADA' && m.salida);
       const pendientes = propias.filter((m) => m.estado !== 'CERRADA' && m.entrada >= inicio && m.entrada < fin);
-      const plan = new Map<string, HorarioTurno | null>(
-        programadas.filter((p) => p.empleadoId === emp.id).map((p) => [p.fecha, horarioDeFila(p)]),
+      const plan = programacionEntre(
+        versiones.filter((v) => v.empleadoId === emp.id).map(versionDeFila),
+        sumarDias(q.desde, -1),
+        sumarDias(q.hasta, 1),
       );
       const liquidacion = liquidar(
         cerradas.map((m) => ({ entrada: m.entrada, salida: m.salida! })),

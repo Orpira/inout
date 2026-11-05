@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type HorarioTurno, desdeLocal, liquidar, validarHorario, validarProgramacion, ventanasTurno } from '../src/index.js';
+import { type HorarioTurno, desdeLocal, liquidar, programacionEntre, validarHorario, validarProgramacion, validarSemanaTipo, ventanasTurno } from '../src/index.js';
 
 const t = (fecha: string, de: string, a: string, fechaFin = fecha) => ({ entrada: desdeLocal(fecha, de), salida: desdeLocal(fechaFin, a) });
 const DIURNO = { horaInicio: '07:00', horaFin: '16:00', descansoInicio: '12:00', descansoFin: '13:00' }; // 8 h
@@ -75,6 +75,13 @@ describe('liquidar con turnos', () => {
     expect(dias.map((d) => [d.fecha, d.ausente])).toEqual([['2026-11-03', true]]);
   });
 
+  it('un festivo no trabajado no es ausencia; trabajado lleva recargo', () => {
+    const p = prog([['2026-11-02', DIURNO]]); // lunes festivo (Todos los Santos)
+    expect(liquidar([], { programacion: p, ahora: AHORA }).dias).toEqual([]);
+    const [d] = liquidar([t('2026-11-02', '07:00', '12:00')], { programacion: p, ahora: AHORA }).dias;
+    expect(d!.minutos.ordinariaDiurnaDominical).toBe(300);
+  });
+
   it('turno nocturno empezado después de medianoche pertenece al día programado', () => {
     const p = prog([['2026-11-07', NOCHE]]);
     const { dias } = liquidar([t('2026-11-08', '00:30', '06:00')], { programacion: p, ahora: AHORA });
@@ -88,5 +95,32 @@ describe('liquidar con turnos', () => {
     const conLunesDeDescanso = liquidar(domingo, { diaDescanso: 1 }).dias[0]!;
     expect(conLunesDeDescanso.minutos.ordinariaDiurna).toBe(240);
     expect(liquidar([t('2026-11-09', '08:00', '12:00')], { diaDescanso: 1 }).dias[0]!.minutos.ordinariaDiurnaDominical).toBe(240);
+  });
+});
+
+describe('horario fijo', () => {
+  const N = null;
+  const lunAVie = [N, DIURNO, DIURNO, DIURNO, DIURNO, DIURNO, N]; // 40 h
+  it('rige la última versión vigente para cada fecha', () => {
+    const noches = [N, NOCHE, NOCHE, NOCHE, NOCHE, NOCHE, N];
+    const p = programacionEntre(
+      [
+        { vigenteDesde: '2026-11-05', semana: noches },
+        { vigenteDesde: '2026-11-01', semana: lunAVie },
+      ],
+      '2026-10-31',
+      '2026-11-08',
+    );
+    expect(p.has('2026-10-31')).toBe(false); // antes de cualquier versión: sin programar
+    expect(p.get('2026-11-01')).toBeNull(); // domingo: descanso
+    expect(p.get('2026-11-04')).toBe(DIURNO); // miércoles, primera versión
+    expect(p.get('2026-11-05')).toBe(NOCHE); // jueves, ya rige la segunda
+    expect(p.get('2026-11-07')).toBeNull();
+  });
+  it('valida contra la jornada máxima de la semana en que empieza a regir', () => {
+    const seis = [N, DIURNO, DIURNO, DIURNO, DIURNO, DIURNO, DIURNO]; // 48 h
+    expect(validarSemanaTipo(lunAVie, '2026-11-05').errores).toEqual([]);
+    expect(validarSemanaTipo(seis, '2026-11-05').errores[0]).toMatch(/^48 h ordinarias.*42 h/);
+    expect(validarSemanaTipo(seis.map(() => DIURNO), '2026-11-05').errores.some((e) => /descanso/.test(e))).toBe(true);
   });
 });

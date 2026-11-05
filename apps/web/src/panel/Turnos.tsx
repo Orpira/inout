@@ -1,163 +1,219 @@
-import { type HorarioTurno, lunesDeSemana, parametrosEn, sumarDias, validarHorario, ventanasTurno } from '@inout/core';
+import { type HorarioTurno, parametrosEn, validarHorario, validarSemanaTipo, ventanasTurno } from '@inout/core';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, Fragment, useState } from 'react';
 import { api } from '../api';
 import { DIAS_SEMANA } from './Empleados';
-import type { Empleado, Festivo, FilaProgramacion, TurnoCatalogo } from './tipos';
+import type { Empleado, TurnoCatalogo, VersionHorario } from './tipos';
 import { Boton, Campo, Entrada, MensajeError, Modal, Selector, Tabla, Vacio, horas, hoyColombia } from './ui';
-
-/** Valor de una celda: id de turno, día de descanso o sin programar. */
-type Valor = number | 'DESCANSO' | null;
-const clave = (empleadoId: number, fecha: string) => `${empleadoId}|${fecha}`;
-const aSelect = (v: Valor) => (v === null ? '' : v === 'DESCANSO' ? 'D' : String(v));
-const deSelect = (s: string): Valor => (s === '' ? null : s === 'D' ? 'DESCANSO' : Number(s));
-const valorDeFila = (f: FilaProgramacion | undefined): Valor => (!f ? null : f.turnoId ?? 'DESCANSO');
 
 const ordinariaMin = (h: HorarioTurno) => (validarHorario(h) ? 0 : ventanasTurno('2026-01-05', h).ordinariaMin);
 const textoHorario = (h: HorarioTurno) =>
   `${h.horaInicio}–${h.horaFin}${h.descansoInicio ? ` (descanso ${h.descansoInicio}–${h.descansoFin})` : ''}`;
+const totalSemana = (semana: (HorarioTurno | null)[]) => semana.reduce((s, h) => s + (h ? ordinariaMin(h) : 0), 0);
 
-function semana(lunes: string) {
-  return Array.from({ length: 7 }, (_, i) => sumarDias(lunes, i));
-}
+/** Orden de presentación: lunes a domingo (índices de la semana con 0 = domingo). */
+const ORDEN = [1, 2, 3, 4, 5, 6, 0];
+const CORTO = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+/** Versión vigente en una fecha (la última con vigenteDesde <= fecha). */
+const vigenteEn = (versiones: VersionHorario[], fecha: string) => versiones.filter((v) => v.vigenteDesde <= fecha).at(-1);
 
 // ---------------------------------------------------------------------------
-// Programación semanal
+// Horarios fijos de los empleados
 // ---------------------------------------------------------------------------
 
-function useFestivos(fechas: string[]) {
-  const anios = [...new Set(fechas.map((f) => Number(f.slice(0, 4))))];
-  const qs = useQuery({
-    queryKey: ['festivos', ...anios],
-    queryFn: async () => (await Promise.all(anios.map((a) => api<{ festivos: Festivo[] }>(`/festivos/${a}`)))).flatMap((r) => r.festivos),
-  });
-  return new Map((qs.data ?? []).map((f) => [f.fecha, f.nombre]));
-}
+type Celda = number | 'DESCANSO';
 
-function ProgramacionSemanal() {
+function FormHorario({ empleado, actual, onCerrar }: { empleado: Empleado; actual?: VersionHorario; onCerrar: () => void }) {
   const qc = useQueryClient();
   const hoy = hoyColombia();
-  const [lunes, setLunes] = useState(() => lunesDeSemana(hoy));
-  const [cambios, setCambios] = useState(new Map<string, Valor>());
-  const [pidiendoMotivo, setPidiendoMotivo] = useState(false);
-  const [motivo, setMotivo] = useState('');
-  const [avisos, setAvisos] = useState<string[]>([]);
-  const dias = semana(lunes);
-  const domingo = dias[6]!;
-
-  const empleados = useQuery({ queryKey: ['empleados'], queryFn: () => api<Empleado[]>('/empleados') });
   const turnos = useQuery({ queryKey: ['turnos'], queryFn: () => api<TurnoCatalogo[]>('/turnos') });
-  const prog = useQuery({
-    queryKey: ['programacion', lunes],
-    queryFn: () => api<FilaProgramacion[]>(`/programacion?desde=${lunes}&hasta=${domingo}`),
-  });
-  const festivos = useFestivos(dias);
+  const activos = (turnos.data ?? []).filter((t) => t.activo);
+  const [semana, setSemana] = useState<Celda[]>(() => (actual ? actual.semana.map((d) => d?.turnoId ?? 'DESCANSO') : Array(7).fill('DESCANSO')));
+  const [desde, setDesde] = useState(hoy);
+  const [motivo, setMotivo] = useState('');
+  const [rapido, setRapido] = useState('');
+  const [avisos, setAvisos] = useState<string[]>();
 
-  const filas = new Map((prog.data ?? []).map((f) => [clave(f.empleadoId, f.fecha), f]));
-  const catalogo = new Map((turnos.data ?? []).map((t) => [t.id, t]));
-  const activos = (empleados.data ?? []).filter((e) => e.activo);
-  const maxSemanaMin = parametrosEn(domingo).jornadaSemanalHoras * 60;
+  const horarioDe = (c: Celda) => (c === 'DESCANSO' ? null : (activos.find((t) => t.id === c) ?? null));
+  const horariosSemana = semana.map(horarioDe);
+  const validacion = validarSemanaTipo(horariosSemana, desde || hoy);
+  const turnoInactivo = semana.some((c) => c !== 'DESCANSO' && !activos.some((t) => t.id === c));
+  const pasado = desde < hoy;
 
-  const valor = (empleadoId: number, fecha: string): Valor => {
-    const k = clave(empleadoId, fecha);
-    return cambios.has(k) ? cambios.get(k)! : valorDeFila(filas.get(k));
-  };
-  /** Horas ordinarias de una celda: la copia guardada si no cambió; si cambió, la del catálogo. */
-  const minutosCelda = (empleadoId: number, fecha: string) => {
-    const k = clave(empleadoId, fecha);
-    const f = filas.get(k);
-    if (!cambios.has(k)) return f?.horaInicio && f.horaFin ? ordinariaMin(f as HorarioTurno) : 0;
-    const v = cambios.get(k);
-    const t = typeof v === 'number' ? catalogo.get(v) : undefined;
-    return t ? ordinariaMin(t) : 0;
-  };
-
-  const cambiar = (empleadoId: number, fecha: string, v: Valor) => {
-    const k = clave(empleadoId, fecha);
-    const nuevo = new Map(cambios);
-    if (v === valorDeFila(filas.get(k))) nuevo.delete(k);
-    else nuevo.set(k, v);
-    setCambios(nuevo);
-  };
-
-  const irA = (l: string) => {
-    if (cambios.size && !confirm('Hay cambios sin guardar en esta semana. ¿Descartarlos?')) return;
-    setCambios(new Map());
-    setAvisos([]);
-    setLunes(l);
-  };
-
-  const copiarAnterior = async () => {
-    const anterior = sumarDias(lunes, -7);
-    const filasAnt = await api<FilaProgramacion[]>(`/programacion?desde=${anterior}&hasta=${sumarDias(anterior, 6)}`);
-    const porClave = new Map(filasAnt.map((f) => [clave(f.empleadoId, f.fecha), f]));
-    const nuevo = new Map(cambios);
-    for (const e of activos)
-      dias.forEach((fecha, i) => {
-        const v = valorDeFila(porClave.get(clave(e.id, sumarDias(anterior, i))));
-        if (v !== valorDeFila(filas.get(clave(e.id, fecha)))) nuevo.set(clave(e.id, fecha), v);
-        else nuevo.delete(clave(e.id, fecha));
-      });
-    setCambios(nuevo);
+  const rellenar = (dias: number[]) => {
+    if (!rapido) return;
+    setSemana(semana.map((_, i) => (dias.includes(i) ? Number(rapido) : 'DESCANSO')));
   };
 
   const guardar = useMutation({
     mutationFn: () =>
-      api<{ avisos: string[] }>('/programacion', {
-        method: 'PUT',
-        body: JSON.stringify({
-          cambios: [...cambios].map(([k, turnoId]) => {
-            const [empleadoId, fecha] = k.split('|');
-            return { empleadoId: Number(empleadoId), fecha, turnoId };
-          }),
-          motivo: motivo || undefined,
-        }),
+      api<{ avisos: string[] }>('/horarios', {
+        method: 'POST',
+        body: JSON.stringify({ empleadoId: empleado.id, vigenteDesde: desde, semana, motivo: motivo || undefined }),
       }),
     onSuccess: (r) => {
-      setAvisos(r.avisos);
-      setCambios(new Map());
-      setPidiendoMotivo(false);
-      setMotivo('');
-      qc.invalidateQueries({ queryKey: ['programacion'] });
+      qc.invalidateQueries({ queryKey: ['horarios'] });
       qc.invalidateQueries({ queryKey: ['liquidacion'] });
+      if (r.avisos.length) setAvisos(r.avisos);
+      else onCerrar();
     },
   });
-  const hayPasados = [...cambios.keys()].some((k) => k.split('|')[1]! < hoy);
-  const pedirGuardar = () => (hayPasados ? setPidiendoMotivo(true) : guardar.mutate());
 
-  const turnosActivos = (turnos.data ?? []).filter((t) => t.activo);
-
-  return (
-    <section className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Boton onClick={() => irA(sumarDias(lunes, -7))}>‹</Boton>
-        <span className="min-w-56 text-center font-semibold">
-          Semana del {lunes} al {domingo}
-        </span>
-        <Boton onClick={() => irA(sumarDias(lunes, 7))}>›</Boton>
-        <Boton onClick={() => irA(lunesDeSemana(hoy))}>Esta semana</Boton>
-        <Boton onClick={copiarAnterior}>Copiar semana anterior</Boton>
-        <div className="ml-auto flex gap-2">
-          {cambios.size > 0 && <Boton onClick={() => setCambios(new Map())}>Descartar</Boton>}
-          <Boton variante="primario" disabled={!cambios.size || guardar.isPending} onClick={pedirGuardar}>
-            Guardar{cambios.size ? ` (${cambios.size})` : ''}
-          </Boton>
-        </div>
-      </div>
-      <p className="text-xs text-slate-500">
-        Máximo legal esta semana: {maxSemanaMin / 60} h ordinarias, en 5 o 6 días y con al menos un día de descanso. Más de 8 h en un día exige
-        pacto escrito de jornada flexible (hasta 9 h). Lo que se trabaje por encima del turno programado se liquida como extra; un día de
-        descanso trabajado es todo extra.
-      </p>
-      {!pidiendoMotivo && <MensajeError error={guardar.error} />}
-      {avisos.length > 0 && (
+  if (avisos)
+    return (
+      <Modal titulo="Horario guardado" onCerrar={onCerrar}>
         <ul className="rounded bg-amber-50 p-2 text-sm text-amber-800">
           {avisos.map((a) => (
             <li key={a}>{a}</li>
           ))}
         </ul>
-      )}
-      <MensajeError error={empleados.error ?? turnos.error ?? prog.error} />
+        <div className="flex justify-end">
+          <Boton variante="primario" onClick={onCerrar}>
+            Entendido
+          </Boton>
+        </div>
+      </Modal>
+    );
+
+  return (
+    <Modal titulo={`Horario fijo · ${empleado.nombre}`} onCerrar={onCerrar}>
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          guardar.mutate();
+        }}
+      >
+        <div className="flex flex-wrap items-end gap-2 rounded bg-slate-50 p-2">
+          <Campo etiqueta="Rellenar rápido con">
+            <Selector value={rapido} onChange={(e) => setRapido(e.target.value)}>
+              <option value="">Elegir turno…</option>
+              {activos.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.nombre} · {textoHorario(t)}
+                </option>
+              ))}
+            </Selector>
+          </Campo>
+          <Boton disabled={!rapido} onClick={() => rellenar([1, 2, 3, 4, 5])}>
+            Lunes a viernes
+          </Boton>
+          <Boton disabled={!rapido} onClick={() => rellenar([1, 2, 3, 4, 5, 6])}>
+            Lunes a sábado
+          </Boton>
+        </div>
+        <div className="grid grid-cols-[6rem_1fr] items-center gap-x-3 gap-y-1.5">
+          {ORDEN.map((i) => (
+            <Fragment key={i}>
+              <span className={`text-sm ${i === empleado.diaDescanso ? 'font-semibold' : ''}`}>
+                {DIAS_SEMANA[i]}
+                {i === empleado.diaDescanso && <span className="block text-xs font-normal text-slate-500">desc. obligatorio</span>}
+              </span>
+              <Selector
+                value={String(semana[i])}
+                onChange={(e) => setSemana(semana.map((c, k) => (k === i ? (e.target.value === 'DESCANSO' ? 'DESCANSO' : Number(e.target.value)) : c)))}
+              >
+                <option value="DESCANSO">Descanso</option>
+                {activos.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.nombre} · {textoHorario(t)}
+                  </option>
+                ))}
+              </Selector>
+            </Fragment>
+          ))}
+        </div>
+        <p className="text-sm">
+          Total: <b>{horas(totalSemana(horariosSemana))}</b> h ordinarias por semana (máximo legal {parametrosEn(desde || hoy).jornadaSemanalHoras} h).
+        </p>
+        {turnoInactivo && <p className="text-sm text-rose-700">Hay días con un turno inactivo: elige otro.</p>}
+        {validacion.errores.length > 0 && <MensajeError error={new Error(validacion.errores.join('\n'))} />}
+        {validacion.avisos.length > 0 && (
+          <ul className="rounded bg-amber-50 p-2 text-xs text-amber-800">
+            {[...new Set(validacion.avisos)].map((a) => (
+              <li key={a}>{a}</li>
+            ))}
+          </ul>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          <Campo etiqueta="Rige desde">
+            <Entrada type="date" value={desde} onChange={(e) => setDesde(e.target.value)} required />
+          </Campo>
+          <Campo etiqueta={pasado ? 'Motivo (fecha pasada: cambia liquidaciones)' : 'Motivo (opcional)'}>
+            <Entrada value={motivo} onChange={(e) => setMotivo(e.target.value)} minLength={5} required={pasado} />
+          </Campo>
+        </div>
+        <p className="text-xs text-slate-500">
+          Los días anteriores a esa fecha se siguen liquidando con el horario que tenían. Las horas trabajadas por encima del turno son extras; un
+          día de descanso trabajado es todo extra.
+        </p>
+        <MensajeError error={guardar.error} />
+        <div className="flex justify-end gap-2">
+          <Boton onClick={onCerrar}>Cancelar</Boton>
+          <Boton variante="primario" type="submit" disabled={guardar.isPending || validacion.errores.length > 0 || turnoInactivo}>
+            Guardar horario
+          </Boton>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function Historial({ versiones, esAdmin }: { versiones: VersionHorario[]; esAdmin: boolean }) {
+  const qc = useQueryClient();
+  const borrar = useMutation({
+    mutationFn: ({ v, motivo }: { v: VersionHorario; motivo: string }) =>
+      api(`/horarios/${v.empleadoId}/${v.vigenteDesde}`, { method: 'DELETE', body: JSON.stringify({ motivo }) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['horarios'] });
+      qc.invalidateQueries({ queryKey: ['liquidacion'] });
+    },
+  });
+  return (
+    <div className="flex flex-col gap-1 text-xs">
+      <MensajeError error={borrar.error} />
+      {[...versiones].reverse().map((v) => (
+        <div key={v.vigenteDesde} className="flex items-center gap-2">
+          <span className="w-28 tabular-nums">Desde {v.vigenteDesde}</span>
+          <span className="text-slate-600">
+            {ORDEN.map((i) => `${CORTO[i]} ${v.semana[i]?.nombre ?? '—'}`).join(' · ')} · {horas(totalSemana(v.semana))} h
+          </span>
+          {esAdmin && (
+            <button
+              type="button"
+              className="ml-auto text-rose-700 hover:underline"
+              onClick={() => {
+                const motivo = prompt(`Motivo para eliminar el horario vigente desde ${v.vigenteDesde}:`);
+                if (motivo) borrar.mutate({ v, motivo });
+              }}
+            >
+              Eliminar
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HorariosEmpleados({ esAdmin }: { esAdmin: boolean }) {
+  const hoy = hoyColombia();
+  const [editando, setEditando] = useState<Empleado>();
+  const [abierto, setAbierto] = useState<number>();
+  const empleados = useQuery({ queryKey: ['empleados'], queryFn: () => api<Empleado[]>('/empleados') });
+  const versiones = useQuery({ queryKey: ['horarios'], queryFn: () => api<VersionHorario[]>('/horarios') });
+  const activos = (empleados.data ?? []).filter((e) => e.activo);
+  const maxMin = parametrosEn(hoy).jornadaSemanalHoras * 60;
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="font-semibold">Horario fijo de cada empleado</h2>
+      <p className="text-xs text-slate-500">
+        Cada empleado tiene un turno por día de la semana. Se asigna una vez y se cambia solo cuando haga falta, indicando desde qué fecha rige.
+        Sin horario se aplica la jornada pactada o la legal ÷ 6. Máximo legal hoy: {maxMin / 60} h ordinarias por semana.
+      </p>
+      <MensajeError error={empleados.error ?? versiones.error} />
       {activos.length === 0 ? (
         <Vacio>No hay empleados activos.</Vacio>
       ) : (
@@ -165,88 +221,74 @@ function ProgramacionSemanal() {
           <thead>
             <tr>
               <th>Empleado</th>
-              {dias.map((f, i) => (
-                <th key={f} className={festivos.has(f) ? 'text-rose-700' : ''} title={festivos.get(f)}>
-                  <div>{DIAS_SEMANA[(i + 1) % 7]}</div>
-                  <div className="text-xs font-normal tabular-nums">
-                    {f.slice(8)}/{f.slice(5, 7)}
-                    {festivos.has(f) && ' · festivo'}
-                  </div>
-                </th>
+              {ORDEN.map((i) => (
+                <th key={i}>{CORTO[i]}</th>
               ))}
               <th>Horas</th>
+              <th>Rige desde</th>
+              <th />
             </tr>
           </thead>
           <tbody>
             {activos.map((e) => {
-              const totalMin = dias.reduce((s, f) => s + minutosCelda(e.id, f), 0);
-              const diasConTurno = dias.filter((f) => typeof valor(e.id, f) === 'number').length;
-              const exceso = totalMin > maxSemanaMin;
+              const propias = (versiones.data ?? []).filter((v) => v.empleadoId === e.id);
+              const actual = vigenteEn(propias, hoy);
+              const futura = propias.find((v) => v.vigenteDesde > hoy);
               return (
-                <tr key={e.id}>
-                  <td className="whitespace-nowrap">{e.nombre}</td>
-                  {dias.map((f) => {
-                    const v = valor(e.id, f);
-                    const cambiado = cambios.has(clave(e.id, f));
-                    const guardada = filas.get(clave(e.id, f));
-                    // Un turno ya programado que hoy está inactivo sigue apareciendo en su celda.
-                    const opciones = typeof v === 'number' && !turnosActivos.some((t) => t.id === v) && catalogo.get(v) ? [...turnosActivos, catalogo.get(v)!] : turnosActivos;
-                    const titulo = guardada?.horaInicio && !cambiado ? `Programado: ${textoHorario(guardada as HorarioTurno)}` : undefined;
-                    return (
-                      <td key={f} className={`${cambiado ? 'bg-amber-50' : ''} ${f < hoy ? 'opacity-70' : ''}`}>
-                        <Selector
-                          value={aSelect(v)}
-                          title={titulo}
-                          onChange={(ev) => cambiar(e.id, f, deSelect(ev.target.value))}
-                          className={`w-28 rounded border px-1 py-1 text-xs ${v === 'DESCANSO' ? 'border-sky-300 bg-sky-50' : 'border-slate-300 bg-white'}`}
-                        >
-                          <option value="">—</option>
-                          <option value="D">Descanso</option>
-                          {opciones.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.nombre}
-                            </option>
-                          ))}
-                        </Selector>
+                <Fragment key={e.id}>
+                  <tr>
+                    <td className="whitespace-nowrap">
+                      {propias.length > 0 ? (
+                        <button type="button" className="text-left" onClick={() => setAbierto(abierto === e.id ? undefined : e.id)}>
+                          <span className="mr-1 text-slate-400">{abierto === e.id ? '▾' : '▸'}</span>
+                          {e.nombre}
+                        </button>
+                      ) : (
+                        e.nombre
+                      )}
+                    </td>
+                    {actual ? (
+                      ORDEN.map((i) => {
+                        const d = actual.semana[i];
+                        return (
+                          <td key={i} className={`whitespace-nowrap text-xs ${d ? '' : 'text-sky-700'}`} title={d ? textoHorario(d) : undefined}>
+                            {d ? d.nombre : 'Descanso'}
+                          </td>
+                        );
+                      })
+                    ) : (
+                      <td colSpan={7} className="text-xs text-slate-400">
+                        Sin horario fijo ({e.jornadaPactadaMin ? `pactada ${horas(e.jornadaPactadaMin)}` : 'jornada legal ÷ 6'})
                       </td>
-                    );
-                  })}
-                  <td className={`whitespace-nowrap tabular-nums ${exceso || diasConTurno === 7 ? 'font-semibold text-rose-700' : ''}`}>
-                    {horas(totalMin)} / {maxSemanaMin / 60}
-                    {diasConTurno === 7 && <div className="text-xs">sin descanso</div>}
-                  </td>
-                </tr>
+                    )}
+                    <td className="whitespace-nowrap tabular-nums">{actual ? horas(totalSemana(actual.semana)) : '—'}</td>
+                    <td className="whitespace-nowrap text-xs tabular-nums">
+                      {actual?.vigenteDesde ?? '—'}
+                      {futura && <div className="text-amber-700">cambia el {futura.vigenteDesde}</div>}
+                    </td>
+                    <td className="text-right">
+                      {esAdmin && <Boton onClick={() => setEditando(e)}>{propias.length ? 'Cambiar' : 'Asignar'}</Boton>}
+                    </td>
+                  </tr>
+                  {abierto === e.id && (
+                    <tr className="bg-slate-50">
+                      <td colSpan={11} className="pl-8">
+                        <Historial versiones={propias} esAdmin={esAdmin} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>
         </Tabla>
       )}
-      <p className="text-xs text-slate-500">
-        «—» = sin programar (se aplica la jornada pactada o la legal ÷ 6). Las celdas en amarillo tienen cambios sin guardar. Cambiar días
-        ya pasados exige un motivo porque altera la liquidación.
-      </p>
-      {pidiendoMotivo && (
-        <Modal titulo="Cambios en días pasados" onCerrar={() => setPidiendoMotivo(false)}>
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={(ev: FormEvent) => {
-              ev.preventDefault();
-              guardar.mutate();
-            }}
-          >
-            <p className="text-sm">Algunos cambios son de días que ya pasaron y modifican la liquidación de esos días.</p>
-            <Campo etiqueta="Motivo">
-              <Entrada value={motivo} onChange={(ev) => setMotivo(ev.target.value)} minLength={5} required />
-            </Campo>
-            <MensajeError error={guardar.error} />
-            <div className="flex justify-end gap-2">
-              <Boton onClick={() => setPidiendoMotivo(false)}>Cancelar</Boton>
-              <Boton variante="primario" type="submit" disabled={guardar.isPending}>
-                Guardar
-              </Boton>
-            </div>
-          </form>
-        </Modal>
+      {editando && (
+        <FormHorario
+          empleado={editando}
+          actual={(versiones.data ?? []).filter((v) => v.empleadoId === editando.id).at(-1)}
+          onCerrar={() => setEditando(undefined)}
+        />
       )}
     </section>
   );
@@ -315,7 +357,7 @@ function FormTurno({ turno, onCerrar }: { turno?: TurnoCatalogo; onCerrar: () =>
         </p>
         <p className="text-xs text-slate-500">
           El descanso (almuerzo) no es tiempo de trabajo. Si el empleado no marca la pausa, se presume tomada en este horario. Cambiar un turno
-          solo afecta a lo que se programe después.
+          solo afecta a los horarios que se asignen después.
         </p>
         {turno && (
           <>
@@ -388,7 +430,7 @@ function CatalogoTurnos({ esAdmin }: { esAdmin: boolean }) {
 export function Turnos({ esAdmin }: { esAdmin: boolean }) {
   return (
     <div className="flex flex-col gap-8">
-      <ProgramacionSemanal />
+      <HorariosEmpleados esAdmin={esAdmin} />
       <CatalogoTurnos esAdmin={esAdmin} />
     </div>
   );

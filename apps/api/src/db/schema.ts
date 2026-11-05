@@ -102,24 +102,32 @@ export const turnos = pgTable('turnos', {
   creadoEn: instante('creado_en').notNull().defaultNow(),
 });
 
+/** Horario de un día dentro del horario fijo: copia del turno (null = descanso). */
+export interface DiaHorario {
+  turnoId: number;
+  nombre: string;
+  horaInicio: string;
+  horaFin: string;
+  descansoInicio: string | null;
+  descansoFin: string | null;
+}
+
 /**
- * Programación: un registro por empleado y día. Copia el horario del turno
- * (cambiar el catálogo no altera lo ya programado ni las liquidaciones).
- * Sin turno ni horas = día de descanso programado.
+ * Horario fijo de cada empleado: qué turno hace cada día de la semana.
+ * Se versiona por fecha de vigencia; rige la última versión con
+ * `vigente_desde <= fecha`. Así un cambio no altera liquidaciones anteriores.
+ * Guarda una copia de cada turno: editar el catálogo no cambia horarios ya asignados.
  */
-export const programacion = pgTable(
-  'programacion',
+export const horarios = pgTable(
+  'horarios',
   {
     empleadoId: integer('empleado_id')
       .notNull()
       .references(() => empleados.id),
-    fecha: date('fecha', { mode: 'string' }).notNull(),
-    turnoId: integer('turno_id').references(() => turnos.id),
-    horaInicio: text('hora_inicio'),
-    horaFin: text('hora_fin'),
-    descansoInicio: text('descanso_inicio'),
-    descansoFin: text('descanso_fin'),
-    actualizadoEn: instante('actualizado_en').notNull().defaultNow(),
+    vigenteDesde: date('vigente_desde', { mode: 'string' }).notNull(),
+    /** 7 posiciones, índice 0 = domingo … 6 = sábado. */
+    semana: jsonb('semana').$type<(DiaHorario | null)[]>().notNull(),
+    creadoEn: instante('creado_en').notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.empleadoId, t.fecha] }), index('programacion_fecha').on(t.fecha)],
+  (t) => [primaryKey({ columns: [t.empleadoId, t.vigenteDesde] })],
 );

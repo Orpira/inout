@@ -22,6 +22,13 @@
       "when": 1793921449098,
       "tag": "0002_turnos",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793921955800,
+      "tag": "0003_horarios_fijos",
+      "breakpoints": true
     }
   ]
 }

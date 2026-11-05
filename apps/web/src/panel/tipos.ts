@@ -82,13 +82,21 @@ export interface TurnoCatalogo {
   activo: boolean;
 }
 
-/** Fila de programación: sin horas = día de descanso. */
-export interface FilaProgramacion {
+/** Día dentro de un horario fijo (copia del turno); null = descanso. */
+export interface DiaHorario {
+  turnoId: number;
+  nombre: string;
+  horaInicio: string;
+  horaFin: string;
+  descansoInicio: string | null;
+  descansoFin: string | null;
+}
+
+/** Versión del horario fijo de un empleado. semana: índice 0 = domingo. */
+export interface VersionHorario {
   empleadoId: number;
-  fecha: string;
-  turnoId: number | null;
-  horaInicio: string | null;
-  horaFin: string | null;
+  vigenteDesde: string;
+  semana: (DiaHorario | null)[];
 }
 
 export interface Festivo {

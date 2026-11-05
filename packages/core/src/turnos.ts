@@ -1,8 +1,12 @@
 import { parametrosEn } from './parametros.js';
-import { type FechaLocal, desdeLocal, lunesDeSemana, sumarDias } from './zona.js';
+import { type FechaLocal, desdeLocal, diaSemanaDeFecha, lunesDeSemana, sumarDias } from './zona.js';
 
 /**
- * Turnos programados.
+ * Turnos y horarios fijos.
+ *
+ * Cada empleado tiene un horario fijo: qué turno hace cada día de la semana
+ * (o si descansa). Cambia ocasionalmente, por eso se versiona con una fecha
+ * de vigencia y rige la última versión con `vigenteDesde <= fecha`.
  *
  * Un turno es un horario en hora de Colombia ('HH:MM'). Si la hora de fin es
  * menor o igual que la de inicio, el turno termina al día siguiente. El
@@ -121,4 +125,36 @@ export function validarProgramacion(dias: DiaDeProgramacion[]): ResultadoValidac
     if (s.turnos >= 7) errores.push(`Semana del ${lunes}: hay que dejar al menos un día de descanso (CST art. 161 y 172)`);
   }
   return { errores, avisos };
+}
+
+/** Horario fijo semanal: 7 posiciones, índice 0 = domingo … 6 = sábado; null = descanso. */
+export type SemanaTipo = (HorarioTurno | null)[];
+
+export interface VersionHorario {
+  vigenteDesde: FechaLocal;
+  semana: SemanaTipo;
+}
+
+/** Turno (o descanso) de cada fecha del rango según las versiones vigentes. Sin versión vigente: la fecha no aparece. */
+export function programacionEntre(versiones: VersionHorario[], desde: FechaLocal, hasta: FechaLocal): Map<FechaLocal, HorarioTurno | null> {
+  const ordenadas = [...versiones].sort((a, b) => a.vigenteDesde.localeCompare(b.vigenteDesde));
+  const res = new Map<FechaLocal, HorarioTurno | null>();
+  for (let f = desde; f <= hasta; f = sumarDias(f, 1)) {
+    const v = ordenadas.findLast((x) => x.vigenteDesde <= f);
+    if (v) res.set(f, v.semana[diaSemanaDeFecha(f)] ?? null);
+  }
+  return res;
+}
+
+/** Valida un horario fijo con las normas vigentes en la semana en que empieza a regir. */
+export function validarSemanaTipo(semana: SemanaTipo, vigenteDesde: FechaLocal): ResultadoValidacion {
+  if (semana.length !== 7) return { errores: ['El horario debe tener los 7 días de la semana'], avisos: [] };
+  const lunes = lunesDeSemana(vigenteDesde);
+  const dias = Array.from({ length: 7 }, (_, i) => sumarDias(lunes, i));
+  const r = validarProgramacion(dias.map((fecha) => ({ fecha, horario: semana[diaSemanaDeFecha(fecha)] ?? null })));
+  // En un horario fijo los mensajes no van por fecha sino por día de la semana.
+  const NOMBRES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  const limpiar = (m: string) =>
+    m.replace(/^(\d{4}-\d{2}-\d{2}): /, (_, f: string) => `${NOMBRES[diaSemanaDeFecha(f)]}: `).replace(/^Semana del \d{4}-\d{2}-\d{2}: /, '');
+  return { errores: r.errores.map(limpiar), avisos: r.avisos.map(limpiar) };
 }
