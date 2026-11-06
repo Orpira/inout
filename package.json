@@ -1,27 +1,29 @@
 {
-    "private": true,
-    "type": "module",
-    "scripts": {
-        "build": "vite build",
-        "dev": "vite"
-    },
-    "devDependencies": {
-        "@babel/plugin-proposal-decorators": "^7.22.5",
-        "@tailwindcss/forms": "^0.5.2",
-        "alpinejs": "^3.4.2",
-        "autoprefixer": "^10.4.2",
-        "axios": "^1.7.4",
-        "concurrently": "^9.0.1",
-        "laravel-vite-plugin": "^1.0",
-        "postcss": "^8.4.31",
-        "tailwindcss": "^3.1.0",
-        "typescript": "^5.7.3",
-        "vite": "^6.0"
-    },
-    "dependencies": {
-        "jquery": "^3.7.1",
-        "jquery-ui": "^1.14.1",
-        "popper.js": "^1.16.1",
-        "pg": "^8.11.0"
-    }
+  "name": "inout",
+  "private": true,
+  "version": "2.0.0",
+  "description": "INOUT — Control de asistencia y liquidación de horas extras (Colombia)",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @inout/api\" \"npm run dev -w @inout/web\"",
+    "build": "npm run build -w @inout/web && npm run build -w @inout/api",
+    "start": "npm run start -w @inout/api",
+    "test": "npm run test -w @inout/core && npm run test -w @inout/api",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:migrate": "npm run db:migrate -w @inout/api",
+    "db:generate": "npm run db:generate -w @inout/api",
+    "db:seed": "npm run db:seed -w @inout/api",
+    "migrar:laravel": "npm run migrar:laravel -w @inout/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.5",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
 }

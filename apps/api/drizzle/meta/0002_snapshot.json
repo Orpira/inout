@@ -1,0 +1,1062 @@
+{
+  "id": "6b8b5eb1-f1c3-4e07-9ee3-7d367f431de9",
+  "prevId": "48972f3a-58d7-43d2-b21f-eba9417cb047",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.auditoria": {
+      "name": "auditoria",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "usuario_id": {
+          "name": "usuario_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "entidad": {
+          "name": "entidad",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entidad_id": {
+          "name": "entidad_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "accion": {
+          "name": "accion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "motivo": {
+          "name": "motivo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "antes": {
+          "name": "antes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "despues": {
+          "name": "despues",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "creado_en": {
+          "name": "creado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "auditoria_entidad_idx": {
+          "name": "auditoria_entidad_idx",
+          "columns": [
+            {
+              "expression": "entidad",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entidad_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "auditoria_usuario_id_usuarios_id_fk": {
+          "name": "auditoria_usuario_id_usuarios_id_fk",
+          "tableFrom": "auditoria",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "usuario_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.empleados": {
+      "name": "empleados",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "identificacion": {
+          "name": "identificacion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "apellido": {
+          "name": "apellido",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cargo": {
+          "name": "cargo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "telefono": {
+          "name": "telefono",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "salario": {
+          "name": "salario",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "horario_id": {
+          "name": "horario_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fecha_ingreso": {
+          "name": "fecha_ingreso",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "activo": {
+          "name": "activo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "creado_en": {
+          "name": "creado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "actualizado_en": {
+          "name": "actualizado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "empleados_identificacion_uq": {
+          "name": "empleados_identificacion_uq",
+          "columns": [
+            {
+              "expression": "identificacion",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "empleados_horario_id_horarios_id_fk": {
+          "name": "empleados_horario_id_horarios_id_fk",
+          "tableFrom": "empleados",
+          "tableTo": "horarios",
+          "columnsFrom": [
+            "horario_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "empleados_salario_ck": {
+          "name": "empleados_salario_ck",
+          "value": "\"empleados\".\"salario\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.festivos_ajustes": {
+      "name": "festivos_ajustes",
+      "schema": "",
+      "columns": {
+        "fecha": {
+          "name": "fecha",
+          "type": "date",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "tipo_ajuste_festivo",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "descripcion": {
+          "name": "descripcion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "creado_en": {
+          "name": "creado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.horarios": {
+      "name": "horarios",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "tipo_horario",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dias": {
+          "name": "dias",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "descanso": {
+          "name": "descanso",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tolerancia_minutos": {
+          "name": "tolerancia_minutos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "requiere_aprobacion": {
+          "name": "requiere_aprobacion",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "activo": {
+          "name": "activo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "creado_en": {
+          "name": "creado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "actualizado_en": {
+          "name": "actualizado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.liquidacion_lineas": {
+      "name": "liquidacion_lineas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "marcacion_id": {
+          "name": "marcacion_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "categoria": {
+          "name": "categoria",
+          "type": "categoria_hora",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "minutos": {
+          "name": "minutos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "factor": {
+          "name": "factor",
+          "type": "numeric(6, 4)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_hora": {
+          "name": "valor_hora",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor": {
+          "name": "valor",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "liquidacion_lineas_marcacion_idx": {
+          "name": "liquidacion_lineas_marcacion_idx",
+          "columns": [
+            {
+              "expression": "marcacion_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "liquidacion_lineas_marcacion_id_marcaciones_id_fk": {
+          "name": "liquidacion_lineas_marcacion_id_marcaciones_id_fk",
+          "tableFrom": "liquidacion_lineas",
+          "tableTo": "marcaciones",
+          "columnsFrom": [
+            "marcacion_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.marcaciones": {
+      "name": "marcaciones",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "empleado_id": {
+          "name": "empleado_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entrada": {
+          "name": "entrada",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "salida": {
+          "name": "salida",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "estado": {
+          "name": "estado",
+          "type": "estado_marcacion",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ABIERTA'"
+        },
+        "origen": {
+          "name": "origen",
+          "type": "origen_marcacion",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'KIOSKO'"
+        },
+        "observacion": {
+          "name": "observacion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "minutos_totales": {
+          "name": "minutos_totales",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "minutos_extra": {
+          "name": "minutos_extra",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "minutos_extra_calculados": {
+          "name": "minutos_extra_calculados",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "minutos_descanso": {
+          "name": "minutos_descanso",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "estado_extras": {
+          "name": "estado_extras",
+          "type": "estado_extras",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "minutos_extra_aprobados": {
+          "name": "minutos_extra_aprobados",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "extras_revisadas_por": {
+          "name": "extras_revisadas_por",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "extras_revisadas_en": {
+          "name": "extras_revisadas_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_recargos": {
+          "name": "valor_recargos",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "alertas": {
+          "name": "alertas",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
+        "creado_por": {
+          "name": "creado_por",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "creado_en": {
+          "name": "creado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "actualizado_en": {
+          "name": "actualizado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "marcaciones_empleado_entrada_idx": {
+          "name": "marcaciones_empleado_entrada_idx",
+          "columns": [
+            {
+              "expression": "empleado_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "entrada",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "marcaciones_entrada_idx": {
+          "name": "marcaciones_entrada_idx",
+          "columns": [
+            {
+              "expression": "entrada",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "marcaciones_estado_idx": {
+          "name": "marcaciones_estado_idx",
+          "columns": [
+            {
+              "expression": "estado",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "marcaciones_estado_extras_idx": {
+          "name": "marcaciones_estado_extras_idx",
+          "columns": [
+            {
+              "expression": "estado_extras",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "marcaciones_una_abierta_uq": {
+          "name": "marcaciones_una_abierta_uq",
+          "columns": [
+            {
+              "expression": "empleado_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"marcaciones\".\"estado\" = 'ABIERTA'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "marcaciones_empleado_id_empleados_id_fk": {
+          "name": "marcaciones_empleado_id_empleados_id_fk",
+          "tableFrom": "marcaciones",
+          "tableTo": "empleados",
+          "columnsFrom": [
+            "empleado_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "marcaciones_extras_revisadas_por_usuarios_id_fk": {
+          "name": "marcaciones_extras_revisadas_por_usuarios_id_fk",
+          "tableFrom": "marcaciones",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "extras_revisadas_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "marcaciones_creado_por_usuarios_id_fk": {
+          "name": "marcaciones_creado_por_usuarios_id_fk",
+          "tableFrom": "marcaciones",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "creado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "marcaciones_salida_ck": {
+          "name": "marcaciones_salida_ck",
+          "value": "\"marcaciones\".\"salida\" IS NULL OR \"marcaciones\".\"salida\" >= \"marcaciones\".\"entrada\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.marcas_offline": {
+      "name": "marcas_offline",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "codigo": {
+          "name": "codigo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "capturado_en": {
+          "name": "capturado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "capturado_dispositivo": {
+          "name": "capturado_dispositivo",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "desfase_segundos": {
+          "name": "desfase_segundos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "dispositivo": {
+          "name": "dispositivo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recibido_en": {
+          "name": "recibido_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "estado": {
+          "name": "estado",
+          "type": "estado_marca_offline",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mensaje": {
+          "name": "mensaje",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "empleado_id": {
+          "name": "empleado_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "marcacion_id": {
+          "name": "marcacion_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resuelta_por": {
+          "name": "resuelta_por",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resuelta_en": {
+          "name": "resuelta_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nota_resolucion": {
+          "name": "nota_resolucion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "marcas_offline_estado_idx": {
+          "name": "marcas_offline_estado_idx",
+          "columns": [
+            {
+              "expression": "estado",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "capturado_en",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "marcas_offline_empleado_id_empleados_id_fk": {
+          "name": "marcas_offline_empleado_id_empleados_id_fk",
+          "tableFrom": "marcas_offline",
+          "tableTo": "empleados",
+          "columnsFrom": [
+            "empleado_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "marcas_offline_marcacion_id_marcaciones_id_fk": {
+          "name": "marcas_offline_marcacion_id_marcaciones_id_fk",
+          "tableFrom": "marcas_offline",
+          "tableTo": "marcaciones",
+          "columnsFrom": [
+            "marcacion_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "marcas_offline_resuelta_por_usuarios_id_fk": {
+          "name": "marcas_offline_resuelta_por_usuarios_id_fk",
+          "tableFrom": "marcas_offline",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "resuelta_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.usuarios": {
+      "name": "usuarios",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rol": {
+          "name": "rol",
+          "type": "rol",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'SUPERVISOR'"
+        },
+        "activo": {
+          "name": "activo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "ultimo_acceso": {
+          "name": "ultimo_acceso",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "creado_en": {
+          "name": "creado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "actualizado_en": {
+          "name": "actualizado_en",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "usuarios_email_uq": {
+          "name": "usuarios_email_uq",
+          "columns": [
+            {
+              "expression": "lower(\"email\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.categoria_hora": {
+      "name": "categoria_hora",
+      "schema": "public",
+      "values": [
+        "ORD_DIURNA",
+        "ORD_NOCTURNA",
+        "ORD_DIURNA_DF",
+        "ORD_NOCTURNA_DF",
+        "EXT_DIURNA",
+        "EXT_NOCTURNA",
+        "EXT_DIURNA_DF",
+        "EXT_NOCTURNA_DF"
+      ]
+    },
+    "public.estado_extras": {
+      "name": "estado_extras",
+      "schema": "public",
+      "values": [
+        "SIN_EXTRAS",
+        "TOLERANCIA",
+        "PENDIENTE",
+        "APROBADAS",
+        "RECHAZADAS",
+        "AUTOMATICAS"
+      ]
+    },
+    "public.estado_marca_offline": {
+      "name": "estado_marca_offline",
+      "schema": "public",
+      "values": [
+        "APLICADA",
+        "RECHAZADA",
+        "RESUELTA"
+      ]
+    },
+    "public.estado_marcacion": {
+      "name": "estado_marcacion",
+      "schema": "public",
+      "values": [
+        "ABIERTA",
+        "CERRADA",
+        "REVISION",
+        "ANULADA"
+      ]
+    },
+    "public.origen_marcacion": {
+      "name": "origen_marcacion",
+      "schema": "public",
+      "values": [
+        "KIOSKO",
+        "KIOSKO_OFFLINE",
+        "MANUAL",
+        "MIGRACION"
+      ]
+    },
+    "public.rol": {
+      "name": "rol",
+      "schema": "public",
+      "values": [
+        "ADMIN",
+        "SUPERVISOR"
+      ]
+    },
+    "public.tipo_ajuste_festivo": {
+      "name": "tipo_ajuste_festivo",
+      "schema": "public",
+      "values": [
+        "AGREGAR",
+        "QUITAR"
+      ]
+    },
+    "public.tipo_horario": {
+      "name": "tipo_horario",
+      "schema": "public",
+      "values": [
+        "FIJO",
+        "TURNOS"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

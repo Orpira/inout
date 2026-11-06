@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: inout
+      POSTGRES_USER: inout
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inout}
+    volumes:
+      - datos:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inout"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://inout:${POSTGRES_PASSWORD:-inout}@db:5432/inout
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET (mínimo 32 caracteres)}
+      KIOSKO_TOKEN: ${KIOSKO_TOKEN:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  datos:
