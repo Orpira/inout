@@ -44,6 +44,9 @@ const { db } = ctx;
 try {
   if (process.argv.includes("--limpiar")) await limpiar();
   else await simular();
+} catch (e) {
+  console.error(`\n✖ ${(e as Error).message}\n`);
+  process.exitCode = 1;
 } finally {
   await app.close();
 }
@@ -68,6 +71,37 @@ async function login(email: string, password: string) {
   return String(r.headers["set-cookie"] ?? "").split(";")[0]!;
 }
 
+/** Comprueba la conexión, las migraciones y el administrador, con un mensaje claro para cada fallo. */
+async function verificarAdmin(email: string, password: string) {
+  const destino = env.DATABASE_URL.replace(/\/\/[^@/]*@/, "//***@");
+  try {
+    await db.execute(sql`select 1`);
+  } catch (e) {
+    const causa: { code?: string; message?: string } = (e as { cause?: { code?: string; message?: string } }).cause ?? (e as Error);
+    throw new Error(
+      `No se pudo conectar a PostgreSQL (${destino}): ${causa.code ?? causa.message}.\n` +
+        "  Arranca la base o corrige DATABASE_URL en el .env de la raíz del repo.",
+    );
+  }
+  const [tabla] = await db.execute<{ existe: boolean }>(sql`select to_regclass('public.usuarios') is not null as existe`);
+  if (!tabla?.existe) throw new Error(`La base ${destino} no tiene las tablas de INOUT. Ejecuta antes "npm run db:migrate".`);
+
+  const [u] = await db.select().from(usuarios).where(sql`lower(${usuarios.email}) = ${email.toLowerCase()}`);
+  if (!u) {
+    const admins = await db.select({ email: usuarios.email }).from(usuarios).where(and(eq(usuarios.rol, "ADMIN"), eq(usuarios.activo, true)));
+    throw new Error(
+      `No existe el usuario ${email} en ${destino}.\n` +
+        (admins.length
+          ? `  Administradores disponibles: ${admins.map((a) => a.email).join(", ")}. Usa ADMIN_EMAIL y ADMIN_PASSWORD.`
+          : '  Crea el administrador con "npm run db:seed".'),
+    );
+  }
+  if (u.rol !== "ADMIN" || !u.activo) throw new Error(`${email} debe ser un usuario ADMIN activo.`);
+  const cookie = await login(email, password);
+  if (!cookie) throw new Error(`La clave de ${email} no es correcta. Pásala con ADMIN_PASSWORD='...' npm run db:simular`);
+  return cookie;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Simulación
 // ---------------------------------------------------------------------------------------------
@@ -75,8 +109,7 @@ async function login(email: string, password: string) {
 async function simular() {
   const adminEmail = process.env.ADMIN_EMAIL ?? "admin@inout.local";
   const adminPassword = process.env.ADMIN_PASSWORD ?? "cambiar-esta-clave";
-  const admin = await login(adminEmail, adminPassword);
-  if (!admin) throw new Error(`No se pudo iniciar sesión como ${adminEmail}. Ejecuta antes "npm run db:seed" o define ADMIN_EMAIL y ADMIN_PASSWORD.`);
+  const admin = await verificarAdmin(adminEmail, adminPassword);
 
   const ya = await db.select({ id: empleados.id }).from(empleados).where(inArray(empleados.identificacion, [...CODIGOS]));
   if (ya.length) throw new Error('La simulación ya existe. Bórrala con "npm run db:simular -- --limpiar" para repetirla.');
