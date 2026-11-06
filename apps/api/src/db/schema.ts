@@ -174,6 +174,13 @@ export const auditoria = pgTable(
   (t) => [index("auditoria_entidad_idx").on(t.entidad, t.entidadId)],
 );
 
+/** Ajustes generales de la instalación (clave/valor), p. ej. la zona horaria. */
+export const ajustes = pgTable("ajustes", {
+  clave: text("clave").primaryKey(),
+  valor: jsonb("valor").notNull(),
+  actualizadoEn: timestamp("actualizado_en", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const festivosAjustes = pgTable("festivos_ajustes", {
   fecha: date("fecha").primaryKey(),
   tipo: tipoAjusteFestivoEnum("tipo").notNull(),

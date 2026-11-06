@@ -22,6 +22,13 @@
       "when": 1793921585868,
       "tag": "0002_marcas_offline",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793932511419,
+      "tag": "0003_ajustes",
+      "breakpoints": true
     }
   ]
 }

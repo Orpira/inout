@@ -13,6 +13,7 @@ import {
 import type { Env } from "../env.js";
 import { conflicto, noEncontrado, solicitudInvalida } from "../errores.js";
 import type { ServicioCalendario } from "./calendario.js";
+import { zonaSql } from "../db/zona.js";
 
 export type TipoMarca = "ENTRADA" | "SALIDA";
 
@@ -337,7 +338,7 @@ export class ServicioMarcaciones {
     const filas = await this.db
       .selectDistinct({
         empleadoId: marcaciones.empleadoId,
-        fecha: sql<string>`to_char(${marcaciones.entrada} at time zone 'America/Bogota', 'YYYY-MM-DD')`,
+        fecha: sql<string>`to_char(${marcaciones.entrada} at time zone ${zonaSql()}, 'YYYY-MM-DD')`,
       })
       .from(marcaciones)
       .where(

@@ -1,3 +1,5 @@
+import { aplicarZona } from "./zona";
+
 export class ErrorApi extends Error {
   constructor(
     public status: number,
@@ -39,6 +41,7 @@ export async function api<T>(ruta: string, opciones: { method?: string; body?: u
   } finally {
     if (plazo) clearTimeout(plazo);
   }
+  aplicarZona(res.headers.get("x-zona-horaria"));
   if (!res.ok) {
     let cuerpo: { error?: string; codigo?: string } = {};
     try {

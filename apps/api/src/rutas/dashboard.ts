@@ -3,6 +3,7 @@ import { and, count, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
 import { empleados, marcaciones, marcasOffline } from "../db/schema.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
 import { columnasMarcacion } from "./marcaciones.js";
+import { zonaSql } from "../db/zona.js";
 
 export const rutasDashboard: Rutas = (app, { db, calendario }) => {
   const r = zapp(app);
@@ -36,7 +37,7 @@ export const rutasDashboard: Rutas = (app, { db, calendario }) => {
         .where(and(eq(marcaciones.estado, "CERRADA"), gte(marcaciones.entrada, inicioMes))),
       db
         .select({
-          fecha: sql<string>`to_char(${marcaciones.entrada} at time zone 'America/Bogota', 'YYYY-MM-DD')`,
+          fecha: sql<string>`to_char(${marcaciones.entrada} at time zone ${zonaSql()}, 'YYYY-MM-DD')`,
           minutosTotales: sql<number>`coalesce(sum(${marcaciones.minutosTotales}),0)::int`,
           minutosExtra: sql<number>`coalesce(sum(${marcaciones.minutosExtra}),0)::int`,
         })

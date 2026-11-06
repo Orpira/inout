@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { diaSemana } from "@inout/core";
 import { Link } from "react-router";
 import { CintaJornada, LeyendaCinta } from "../componentes/CintaJornada";
 import { Cargando, MensajeError } from "../componentes/ui";
 import { api } from "../lib/api";
-import { duracion, fechaISOCorta, fechaLarga, horasDecimales, hora, nombreCompleto, pesos } from "../lib/formato";
+import { duracion, fechaISOCorta, fechaISOLarga, horasDecimales, hora, nombreCompleto, pesos } from "../lib/formato";
 import type { Dashboard } from "../lib/tipos";
 
 export default function Inicio() {
@@ -16,7 +17,7 @@ export default function Inicio() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-[1.65rem] font-bold">{fechaLarga(`${d.hoy}T12:00:00-05:00`)}</h1>
+        <h1 className="text-[1.65rem] font-bold">{fechaISOLarga(d.hoy)}</h1>
         <p className="mt-1 text-tinta-suave">
           {d.esFestivoHoy ? `Festivo: ${d.esFestivoHoy}. Todas las horas de hoy llevan recargo del ${Math.round(d.parametros.recargoDominical * 100)} %.` : "Día hábil."}
         </p>
@@ -201,7 +202,7 @@ function GraficoDias({ serie }: { serie: Dashboard["serie"] }) {
         {serie.map((s) => {
           const total = (s.minutosTotales / max) * alto;
           const extra = (s.minutosExtra / max) * alto;
-          const dom = new Date(`${s.fecha}T12:00:00-05:00`).getUTCDay() === 0;
+          const dom = diaSemana(s.fecha) === 0;
           return (
             <div key={s.fecha} className="group relative flex flex-1 flex-col justify-end" style={{ height: alto }}>
               <div className="rounded-t-[3px] bg-extra" style={{ height: extra }} />
