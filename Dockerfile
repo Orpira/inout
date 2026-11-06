@@ -27,6 +27,6 @@ COPY --from=build /app/apps/api/drizzle ./drizzle
 COPY --from=build /app/apps/web/dist /app/web
 USER node
 EXPOSE 3000
-HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://localhost:3000/api/salud || exit 1
+HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://127.0.0.1:3000/api/salud || exit 1
 # --migrar aplica las migraciones pendientes antes de arrancar.
 CMD ["node", "dist/server.js", "--migrar"]
