@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/server.ts", "src/db/migrate.ts", "src/db/seed.ts", "src/scripts/migrar-laravel.ts"],
+  entry: ["src/server.ts", "src/db/migrate.ts", "src/db/seed.ts", "src/scripts/migrar-laravel.ts", "src/scripts/simular-mes.ts"],
   format: "esm",
   target: "node20",
   platform: "node",

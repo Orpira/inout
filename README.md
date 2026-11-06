@@ -61,6 +61,28 @@ npm run dev                     # API en :3000, web en http://localhost:5173
 
 Para probar con datos ficticios: `npm run db:seed -- --demo` (5 empleados y dos semanas de turnos).
 
+### Simulación de un mes (demostración completa)
+
+```bash
+npm run db:simular                 # ~5 semanas de marcaciones hasta hoy
+npm run db:simular -- --limpiar    # borra solo lo creado por la simulación
+# Docker: docker compose exec app node dist/scripts/simular-mes.js [--limpiar]
+```
+
+Crea 7 empleados (códigos 2001 a 2007) y 3 horarios terminados en "(simulación)", y recorre el periodo usando los mismos servicios y endpoints de la aplicación, de modo que todo queda auditado con usuario y motivo. Necesita el administrador de `db:seed` (`ADMIN_EMAIL` / `ADMIN_PASSWORD`) y crea el supervisor `supervisor.simulacion@inout.local`, cuya clave se muestra al terminar (o se fija con `SIM_SUPERVISOR_PASSWORD`).
+
+| Empleado | Horario | Qué muestra |
+| --- | --- | --- |
+| 2001 Laura Gómez | Bodega L-S, rota mañana/tarde | Temporada alta la última semana completa: alerta de más de 2 h extra al día y de más de 12 h a la semana (en Liquidación). Un día marcó sin conexión: tablet con el reloj 3 min atrasado, doble toque descartado y código mal digitado (uno resuelto y otro en la bandeja). |
+| 2002 Andrés Ramírez | Bodega L-S, turno tarde 14:00-21:30 | Recargo nocturno desde las 19:00, extras nocturnas, festivos trabajados y un domingo de inventario (todo extra dominical). |
+| 2003 Paola Castro | Nocturno D-V 22:00-05:30 | Recargo nocturno dominical/festivo, extras nocturnas y diurnas al pasar las 06:00. Ahora mismo puede aparecer en turno. |
+| 2004 Jhon Restrepo | Administrativo L-V con aprobación | Tolerancia, extras aprobadas, aprobadas en parte, rechazadas y pendientes; sábado de inventario; festivo trabajado; corrección de horas que anula la aprobación y se vuelve a aprobar. |
+| 2005 Diana Moreno | Administrativo L-V con aprobación | Turno sin salida que pasa a revisión y corrige el supervisor, registro manual por kiosko caído, corrección de la hora de entrada, registro anulado por error y aprobación en lote. |
+| 2006 Carlos Pérez | Sin horario (jornada legal L-S) | Primera hora nocturna (05:00), extras automáticas, cambio de salario con recálculo y un turno reciente sin salida pendiente de revisar. |
+| 2007 Sofía Herrera | Bodega L-S | Temporal: trabaja dos semanas y se da de baja con motivo. |
+
+El horario administrativo se crea con 10 minutos de tolerancia y se edita a 15 con motivo, para que también haya historial en Horarios.
+
 ### Con Docker
 
 ```bash
