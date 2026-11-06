@@ -5,6 +5,7 @@ import { empleados, liquidacionLineas, marcaciones } from "../db/schema.js";
 import { solicitudInvalida } from "../errores.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
 import { fechaISO } from "./marcaciones.js";
+import { zonaSql } from "../db/zona.js";
 
 const rango = z.object({
   desde: fechaISO,
@@ -84,7 +85,7 @@ export const rutasReportes: Rutas = (app, { db }) => {
       db
         .select({
           empleadoId: marcaciones.empleadoId,
-          fecha: sql<string>`to_char(${marcaciones.entrada} at time zone 'America/Bogota', 'YYYY-MM-DD')`,
+          fecha: sql<string>`to_char(${marcaciones.entrada} at time zone ${zonaSql()}, 'YYYY-MM-DD')`,
           minutosExtra: sql<number>`coalesce(sum(${marcaciones.minutosExtra}),0)::int`,
         })
         .from(marcaciones)
@@ -172,8 +173,8 @@ export const rutasReportes: Rutas = (app, { db }) => {
         id: marcaciones.id,
         identificacion: empleados.identificacion,
         empleado: sql<string>`${empleados.nombre} || ' ' || ${empleados.apellido}`,
-        entrada: sql<string>`to_char(${marcaciones.entrada} at time zone 'America/Bogota', 'YYYY-MM-DD HH24:MI')`,
-        salida: sql<string | null>`to_char(${marcaciones.salida} at time zone 'America/Bogota', 'YYYY-MM-DD HH24:MI')`,
+        entrada: sql<string>`to_char(${marcaciones.entrada} at time zone ${zonaSql()}, 'YYYY-MM-DD HH24:MI')`,
+        salida: sql<string | null>`to_char(${marcaciones.salida} at time zone ${zonaSql()}, 'YYYY-MM-DD HH24:MI')`,
         estado: marcaciones.estado,
         origen: marcaciones.origen,
         minutosTotales: marcaciones.minutosTotales,

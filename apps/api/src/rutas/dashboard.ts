@@ -3,6 +3,7 @@ import { and, count, desc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
 import { empleados, marcaciones, marcasOffline } from "../db/schema.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
 import { columnasMarcacion } from "./marcaciones.js";
+import { zonaSql } from "../db/zona.js";
 
 export const rutasDashboard: Rutas = (app, { db, calendario }) => {
   const r = zapp(app);
@@ -38,7 +39,7 @@ export const rutasDashboard: Rutas = (app, { db, calendario }) => {
       // Los turnos en curso suman el tiempo transcurrido hasta ahora.
       db
         .select({
-          fecha: sql<string>`to_char(${marcaciones.entrada} at time zone 'America/Bogota', 'YYYY-MM-DD')`,
+          fecha: sql<string>`to_char(${marcaciones.entrada} at time zone ${zonaSql()}, 'YYYY-MM-DD')`,
           trabajados: sql<number>`coalesce(sum(${marcaciones.minutosTotales} + coalesce(${marcaciones.minutosExtraCalculados},0) - coalesce(${marcaciones.minutosExtra},0)) filter (where ${marcaciones.estado} = 'CERRADA'),0)::int`,
           extraCalculadas: sql<number>`coalesce(sum(${marcaciones.minutosExtraCalculados}) filter (where ${marcaciones.estado} = 'CERRADA'),0)::int`,
           extraLiquidadas: sql<number>`coalesce(sum(${marcaciones.minutosExtra}) filter (where ${marcaciones.estado} = 'CERRADA'),0)::int`,

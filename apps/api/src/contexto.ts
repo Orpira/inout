@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import type { Db } from "./db/client.js";
 import type { Env } from "./env.js";
 import { ErrorHttp } from "./errores.js";
+import type { ServicioAjustes } from "./servicios/ajustes.js";
 import type { ServicioCalendario } from "./servicios/calendario.js";
 import type { ServicioMarcaciones } from "./servicios/marcaciones.js";
 import type { ServicioOffline } from "./servicios/offline.js";
@@ -26,6 +27,7 @@ export interface Contexto {
   db: Db;
   env: Env;
   calendario: ServicioCalendario;
+  ajustes: ServicioAjustes;
   marcaciones: ServicioMarcaciones;
   offline: ServicioOffline;
 }

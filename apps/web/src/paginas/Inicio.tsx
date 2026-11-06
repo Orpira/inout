@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { diaSemana } from "@inout/core";
 import { Link } from "react-router";
 import { CintaJornada, LeyendaCinta } from "../componentes/CintaJornada";
 import { Cargando, MensajeError } from "../componentes/ui";
 import { api } from "../lib/api";
-import { duracion, fechaISOCorta, fechaLarga, horasDecimales, hora, nombreCompleto, pesos } from "../lib/formato";
+import { duracion, fechaISOCorta, fechaISOLarga, horasDecimales, hora, nombreCompleto, pesos } from "../lib/formato";
 import type { Dashboard } from "../lib/tipos";
 
 export default function Inicio() {
@@ -16,7 +17,7 @@ export default function Inicio() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-[1.65rem] font-bold">{fechaLarga(`${d.hoy}T12:00:00-05:00`)}</h1>
+        <h1 className="text-[1.65rem] font-bold">{fechaISOLarga(d.hoy)}</h1>
         <p className="mt-1 text-tinta-suave">
           {d.esFestivoHoy ? `Festivo: ${d.esFestivoHoy}. Todas las horas de hoy llevan recargo del ${Math.round(d.parametros.recargoDominical * 100)} %.` : "Día hábil."}
         </p>
@@ -212,7 +213,7 @@ function GraficoDias({ serie }: { serie: Dashboard["serie"] }) {
       <p className="mb-2 text-[0.78rem] text-tinta-tenue tabular-nums">{horasDecimales(max)} h</p>
       <div className="flex h-[140px] items-end gap-1.5 border-b border-linea" role="img" aria-label="Horas trabajadas por día, con las extras según su estado">
         {serie.map((s) => {
-          const dom = new Date(`${s.fecha}T12:00:00-05:00`).getUTCDay() === 0;
+          const dom = diaSemana(s.fecha) === 0;
           const total = totalDia(s);
           return (
             <div key={s.fecha} className="group relative flex flex-1 flex-col justify-end" style={{ height: alto }}>
