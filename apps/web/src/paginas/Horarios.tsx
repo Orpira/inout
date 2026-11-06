@@ -2,6 +2,7 @@ import { fechaLocal, minutosHorarioFijo, NOMBRES_DIAS, validarHorario, type Desc
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
+import { HistorialCambios } from "../componentes/Historial";
 import { Cargando, Dialogo, Encabezado, MensajeError, useAviso, Vacio } from "../componentes/ui";
 import { api } from "../lib/api";
 import { duracion, horasDecimales } from "../lib/formato";
@@ -130,6 +131,7 @@ function FormHorario({ h, onListo }: { h: Horario | null; onListo: () => void })
   const [tolerancia, setTolerancia] = useState(String(h?.toleranciaMinutos ?? 0));
   const [aprobacion, setAprobacion] = useState(h?.requiereAprobacion ?? true);
   const [activo, setActivo] = useState(h?.activo ?? true);
+  const [motivo, setMotivo] = useState("");
 
   const num = (v: string) => Number(v.replace(",", ".")) || 0;
   const descanso: Descanso | null =
@@ -160,11 +162,12 @@ function FormHorario({ h, onListo }: { h: Horario | null; onListo: () => void })
 
   const mut = useMutation({
     mutationFn: () => {
-      const body = { ...horario, nombre, activo };
+      const body = { ...horario, nombre, activo, ...(h ? { motivo } : {}) };
       return h ? api(`/horarios/${h.id}`, { method: "PUT", body }) : api("/horarios", { body });
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["horarios"] });
+      void qc.invalidateQueries({ queryKey: ["auditoria"] });
       aviso(h ? "Horario guardado. Recalcula los periodos afectados en Festivos y normas si cambió la jornada." : "Horario creado");
       onListo();
     },
@@ -331,10 +334,17 @@ function FormHorario({ h, onListo }: { h: Horario | null; onListo: () => void })
           ))}
         </ul>
       )}
+      {h && (
+        <div>
+          <label className="etiqueta" htmlFor="h-motivo">Motivo del cambio</label>
+          <input id="h-motivo" required minLength={5} className="campo" placeholder="Ej.: nuevo horario de bodega acordado con el comité" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+        </div>
+      )}
       <MensajeError error={mut.error} />
       <button className="btn btn-primario w-full" disabled={mut.isPending || v.errores.length > 0}>
         {mut.isPending ? "Guardando…" : h ? "Guardar horario" : "Crear horario"}
       </button>
+      {h && <HistorialCambios entidad="horario" entidadId={h.id} />}
     </form>
   );
 }

@@ -179,7 +179,8 @@ describe("marcaciones manuales, edición y reportes", () => {
       salida: desdeLocal("2026-11-04", "15:00").toISOString(),
       motivo: "Turno ordinario",
     });
-    await api("POST", "/api/config/festivos/ajustes", { fecha: "2026-11-04", tipo: "AGREGAR", descripcion: "Día cívico" });
+    expect((await api("POST", "/api/config/festivos/ajustes", { fecha: "2026-11-04", tipo: "AGREGAR", descripcion: "Día cívico" })).statusCode).toBe(400);
+    await api("POST", "/api/config/festivos/ajustes", { fecha: "2026-11-04", tipo: "AGREGAR", descripcion: "Día cívico", motivo: "Decreto municipal de día cívico" });
     await api("POST", "/api/marcaciones/recalcular", { desde: "2026-11-04", hasta: "2026-11-04" });
     const lista = (await api("GET", "/api/marcaciones?desde=2026-11-04&hasta=2026-11-04")).json();
     expect(lista.datos[0].valorRecargos).toBe(63_000); // 7 h × 10.000 × 0,9
@@ -323,5 +324,31 @@ describe("kiosko sin conexión", () => {
 
   it("el directorio sin conexión exige token de kiosko", async () => {
     expect((await app.inject({ method: "GET", url: "/api/kiosko/directorio" })).statusCode).toBe(403);
+  });
+});
+
+describe("auditoría de datos maestros", () => {
+  it("registra con motivo los cambios de empleados, horarios y festivos", async () => {
+    const { id } = await crearEmpleado();
+    const base = { identificacion: "1001", nombre: "Laura", apellido: "Gómez", salario: 2_300_000 };
+    expect((await api("PUT", `/api/empleados/${id}`, base)).statusCode).toBe(400); // sin motivo
+    const ok = await api("PUT", `/api/empleados/${id}`, { ...base, motivo: "Incremento salarial 2026" });
+    expect(ok.statusCode).toBe(200);
+    expect((await api("PUT", `/api/empleados/${id}`, { ...base, motivo: "Sin cambios reales" })).statusCode).toBe(400);
+    const hist = (await api("GET", `/api/config/auditoria?entidad=empleado&entidadId=${id}`)).json().datos;
+    expect(hist.map((h: { accion: string }) => h.accion)).toEqual(["EDITAR", "CREAR"]);
+    expect(hist[0]).toMatchObject({ motivo: "Incremento salarial 2026", antes: { salario: 2_100_000 }, despues: { salario: 2_300_000 }, usuario: "Admin" });
+
+    const h = (await api("POST", "/api/horarios", horarioAdministrativo)).json();
+    const edit = await api("PUT", `/api/horarios/${h.id}`, { ...horarioAdministrativo, toleranciaMinutos: 10, motivo: "Acuerdo con el comité" });
+    expect(edit.statusCode).toBe(200);
+    const hh = (await api("GET", `/api/config/auditoria?entidad=horario&entidadId=${h.id}`)).json().datos;
+    expect(hh[0].despues).toEqual({ toleranciaMinutos: 10 });
+
+    await api("POST", "/api/config/festivos/ajustes", { fecha: "2026-07-13", tipo: "QUITAR", motivo: "Sentencia de la Corte" });
+    const del = await api("DELETE", "/api/config/festivos/ajustes/2026-07-13", { motivo: "Se revoca el ajuste" });
+    expect(del.statusCode).toBe(200);
+    const hf = (await api("GET", "/api/config/auditoria?entidad=festivo")).json().datos;
+    expect(hf.map((x: { accion: string }) => x.accion)).toEqual(["RESTAURAR_FESTIVO", "QUITAR_FESTIVO"]);
   });
 });

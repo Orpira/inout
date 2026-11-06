@@ -74,21 +74,41 @@ La aplicación queda en `http://localhost:3000`. Las migraciones se aplican al a
 
 ```bash
 npm test          # motor de liquidación + API contra PostgreSQL (TEST_DATABASE_URL)
+TZ=Europe/Madrid npm test   # el CI repite las pruebas en UTC, Europe/Madrid y America/Bogota
 npm run typecheck
 ```
 
 ## Migrar los datos de la versión Laravel
 
+Laravel guardaba `registros_horarios.entrada/salida` como `timestamp` **sin zona**, en la zona de `config('app.timezone')`. Nunca usó la hora de Colombia:
+
+| Periodo | Zona en que están guardadas las horas |
+| --- | --- |
+| Hasta el despliegue del commit `372b7dd` (6-abr-2026) | `APP_TIMEZONE` del `.env` de producción (por defecto `UTC`) |
+| Desde ese despliegue | `Europe/Madrid` (fijo en `config/app.php`) |
+
+Por eso la zona se indica por periodos, con nombres IANA que respetan el horario de verano de Madrid. El script tiene tres pasos (desde `apps/api`, con `DATABASE_URL` apuntando a una base INOUT 2 vacía):
+
 ```bash
-LARAVEL_DATABASE_URL=postgres://usuario:clave@host:5432/base_laravel \
-DATABASE_URL=postgres://usuario:clave@host:5432/inout \
-npm run migrar:laravel -- --tz=-05:00 --admins=jefe@empresa.co
+# 1. Analizar: a qué hora de Colombia caerían las entradas con cada zona posible.
+npm run migrar:laravel -- --origen postgres://usuario:clave@host/laravel --analizar
+# 2. Simular (no escribe nada) con las zonas elegidas. Usa la fecha real del despliegue.
+npm run migrar:laravel -- --origen … --tz UTC --tz-desde 2026-04-06=Europe/Madrid
+# 3. Migrar.
+npm run migrar:laravel -- --origen … --tz UTC --tz-desde 2026-04-06=Europe/Madrid --ejecutar --admins=jefe@empresa.co
 ```
 
-- Usuarios: se conservan las contraseñas (los hashes bcrypt de Laravel son compatibles).
-- Empleados: se conservan los `id` y la identificación (código de marcación).
-- `registros_horarios` → `marcaciones`. Los cierres automáticos de Laravel y los registros abiertos antiguos quedan **Por revisar**; el resto se liquida de nuevo con las reglas correctas.
-- `--tz` indica cómo guardaba Laravel las horas: `-05:00` si estaban en hora de Colombia, `+00:00` si `APP_TIMEZONE=UTC`. Revisa una marcación conocida tras migrar.
+En el análisis, la zona correcta es la columna cuyo pico coincide con la hora real de llegada del personal.
+
+- **Usuarios:** se conservan las contraseñas (los hashes bcrypt de Laravel son compatibles).
+- **Empleados:** se conservan los `id` y la identificación. Después, asigna a cada uno su horario.
+- **Registros:** los corregidos a mano en Laravel se respetan. Pasan a **Por revisar** las salidas inventadas por el cierre automático (se descartan), las entradas inventadas (1 h antes de la salida), las salidas anteriores a la entrada, los turnos de más de 24 h y los registros abiertos antiguos.
+- **Trazabilidad:** cada marcación migrada guarda en la auditoría el registro original con sus horas tal cual estaban.
+- **Seguridad:** el script se niega a escribir si la base destino ya tiene datos.
+
+## Auditoría
+
+Todo cambio queda en la tabla `auditoria` con usuario, fecha, motivo y valores antes y después: correcciones, anulaciones y aprobaciones de marcaciones; altas y cambios de empleados (incluido el salario); horarios; y ajustes de festivos. Los cambios de empleados, horarios y festivos exigen motivo y se consultan en su propia pantalla.
 
 ## Horarios
 
@@ -150,6 +170,7 @@ Todas las rutas cuelgan de `/api`. Las del panel requieren la cookie de sesión.
 | `GET /reportes/liquidacion?desde&hasta[&formato=csv]` | sesión | Liquidación por empleado y concepto |
 | `GET /reportes/marcaciones?desde&hasta` | sesión | Detalle de marcaciones en CSV |
 | `GET /config/parametros`, `GET /config/festivos?anio` | sesión | Normas vigentes y calendario |
+| `GET /config/auditoria?entidad&entidadId` | sesión | Historial de empleados, horarios o festivos |
 | `POST /config/festivos/ajustes`, `DELETE /config/festivos/ajustes/:fecha` | ADMIN | Añadir o quitar festivos |
 | `GET/POST/PUT /usuarios` | ADMIN | Gestión de usuarios |
 

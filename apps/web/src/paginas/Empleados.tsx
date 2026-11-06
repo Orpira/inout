@@ -2,6 +2,7 @@ import { minutosOrdinariosPorDefecto } from "@inout/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { HistorialCambios } from "../componentes/Historial";
 import { Cargando, Dialogo, Encabezado, MensajeError, useAviso, Vacio } from "../componentes/ui";
 import { api } from "../lib/api";
 import { duracion, hoyLocal, nombreCompleto, pesos } from "../lib/formato";
@@ -118,14 +119,17 @@ function FormEmpleado({ empleado, onListo, jornadaLegal }: { empleado: Empleado 
     horarioId: empleado?.horarioId ? String(empleado.horarioId) : "",
     fechaIngreso: empleado?.fechaIngreso ?? "",
     activo: empleado?.activo ?? true,
+    motivo: "",
   });
   const horarios = useQuery({ queryKey: ["horarios"], queryFn: () => api<{ datos: Horario[] }>("/horarios") });
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
 
   const mut = useMutation({
     mutationFn: () => {
+      const { motivo, ...resto } = f;
       const body = {
-        ...f,
+        ...resto,
+        ...(empleado ? { motivo } : {}),
         salario: Number(f.salario),
         horarioId: f.horarioId ? Number(f.horarioId) : null,
       };
@@ -133,6 +137,7 @@ function FormEmpleado({ empleado, onListo, jornadaLegal }: { empleado: Empleado 
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["empleados"] });
+      void qc.invalidateQueries({ queryKey: ["auditoria"] });
       aviso(empleado ? "Empleado actualizado" : "Empleado añadido");
       onListo();
     },
@@ -172,10 +177,17 @@ function FormEmpleado({ empleado, onListo, jornadaLegal }: { empleado: Empleado 
         <input type="checkbox" className="h-4 w-4 accent-[var(--color-petroleo)]" checked={f.activo} onChange={(e) => setF({ ...f, activo: e.target.checked })} />
         Activo (puede marcar en el kiosko)
       </label>
+      {empleado && (
+        <div>
+          <label className="etiqueta" htmlFor="e-motivo">Motivo del cambio</label>
+          <input id="e-motivo" required minLength={5} className="campo" placeholder="Ej.: incremento salarial de 2026" value={f.motivo} onChange={set("motivo")} />
+        </div>
+      )}
       <MensajeError error={mut.error} />
       <button className="btn btn-primario w-full" disabled={mut.isPending}>
         {mut.isPending ? "Guardando…" : empleado ? "Guardar cambios" : "Añadir empleado"}
       </button>
+      {empleado && <HistorialCambios entidad="empleado" entidadId={empleado.id} />}
     </form>
   );
 }

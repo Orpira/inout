@@ -3,6 +3,7 @@ import { asc, count, eq } from "drizzle-orm";
 import { z } from "zod";
 import { empleados, horarios } from "../db/schema.js";
 import { noEncontrado, solicitudInvalida } from "../errores.js";
+import { auditar, diferencias, motivoObligatorio } from "../servicios/auditoria.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
 
 const hora = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Formato HH:MM");
@@ -70,18 +71,34 @@ export const rutasHorarios: Rutas = (app, { db }) => {
   };
 
   r.post("/", { onRequest: admin, schema: { body: esquemaHorario } }, async (req, reply) => {
-    const [h] = await db.insert(horarios).values(guardar(req.body)).returning();
+    const datos = guardar(req.body);
+    const h = await db.transaction(async (tx) => {
+      const [h] = await tx.insert(horarios).values(datos).returning();
+      await auditar(tx, { entidad: "horario", entidadId: h!.id, usuarioId: req.user.id, accion: "CREAR", motivo: "Alta de horario", antes: null, despues: datos });
+      return h!;
+    });
     reply.code(201);
     return h;
   });
 
   r.put(
     "/:id",
-    { onRequest: admin, schema: { params: z.object({ id: z.coerce.number().int() }), body: esquemaHorario } },
+    {
+      onRequest: admin,
+      schema: { params: z.object({ id: z.coerce.number().int() }), body: esquemaHorario.extend({ motivo: motivoObligatorio }) },
+    },
     async (req) => {
-      const [h] = await db.update(horarios).set(guardar(req.body)).where(eq(horarios.id, req.params.id)).returning();
-      if (!h) throw noEncontrado("Horario");
-      return h;
+      const { motivo, ...resto } = req.body;
+      const datos = guardar(resto);
+      return db.transaction(async (tx) => {
+        const [antes] = await tx.select().from(horarios).where(eq(horarios.id, req.params.id));
+        if (!antes) throw noEncontrado("Horario");
+        const dif = diferencias(antes, datos);
+        if (!dif.hayCambios) throw solicitudInvalida("No hay cambios que guardar.");
+        const [h] = await tx.update(horarios).set(datos).where(eq(horarios.id, req.params.id)).returning();
+        await auditar(tx, { entidad: "horario", entidadId: h!.id, usuarioId: req.user.id, accion: "EDITAR", motivo, antes: dif.antes, despues: dif.despues });
+        return h!;
+      });
     },
   );
 };

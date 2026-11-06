@@ -1,7 +1,8 @@
 import { and, asc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { empleados, horarios } from "../db/schema.js";
-import { conflicto, noEncontrado } from "../errores.js";
+import { conflicto, noEncontrado, solicitudInvalida } from "../errores.js";
+import { auditar, diferencias, motivoObligatorio } from "../servicios/auditoria.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
 
 const texto = z.string().trim();
@@ -74,19 +75,33 @@ export const rutasEmpleados: Rutas = (app, { db }) => {
 
   r.post("/", { onRequest: escritura, schema: { body: esquemaEmpleado } }, async (req, reply) => {
     await validarUnico(req.body.identificacion);
-    const [e] = await db.insert(empleados).values(req.body).returning();
+    const e = await db.transaction(async (tx) => {
+      const [e] = await tx.insert(empleados).values(req.body).returning();
+      await auditar(tx, { entidad: "empleado", entidadId: e!.id, usuarioId: req.user.id, accion: "CREAR", motivo: "Alta de empleado", antes: null, despues: req.body });
+      return e!;
+    });
     reply.code(201);
     return e;
   });
 
   r.put(
     "/:id",
-    { onRequest: escritura, schema: { params: z.object({ id: z.coerce.number().int() }), body: esquemaEmpleado } },
+    {
+      onRequest: escritura,
+      schema: { params: z.object({ id: z.coerce.number().int() }), body: esquemaEmpleado.extend({ motivo: motivoObligatorio }) },
+    },
     async (req) => {
-      await validarUnico(req.body.identificacion, req.params.id);
-      const [e] = await db.update(empleados).set(req.body).where(eq(empleados.id, req.params.id)).returning();
-      if (!e) throw noEncontrado("Empleado");
-      return e;
+      const { motivo, ...datos } = req.body;
+      await validarUnico(datos.identificacion, req.params.id);
+      return db.transaction(async (tx) => {
+        const [antes] = await tx.select().from(empleados).where(eq(empleados.id, req.params.id));
+        if (!antes) throw noEncontrado("Empleado");
+        const dif = diferencias(antes, datos);
+        if (!dif.hayCambios) throw solicitudInvalida("No hay cambios que guardar.");
+        const [e] = await tx.update(empleados).set(datos).where(eq(empleados.id, req.params.id)).returning();
+        await auditar(tx, { entidad: "empleado", entidadId: e!.id, usuarioId: req.user.id, accion: "EDITAR", motivo, antes: dif.antes, despues: dif.despues });
+        return e!;
+      });
     },
   );
 

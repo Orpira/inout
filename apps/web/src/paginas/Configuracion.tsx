@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { HistorialCambios } from "../componentes/Historial";
 import { Cargando, Encabezado, MensajeError, useAviso } from "../componentes/ui";
 import { api } from "../lib/api";
 import { fechaISOCorta, hoyLocal } from "../lib/formato";
@@ -151,18 +152,26 @@ function AjustesFestivos({ anio, ajustes }: { anio: number; ajustes: Festivos["a
   const refrescar = () => void qc.invalidateQueries({ queryKey: ["festivos", anio] });
 
   const guardar = useMutation({
-    mutationFn: () => api("/config/festivos/ajustes", { body: { fecha, tipo, descripcion } }),
+    mutationFn: () => api("/config/festivos/ajustes", { body: { fecha, tipo, descripcion, motivo } }),
     onSuccess: () => {
       refrescar();
       setFecha("");
       setDescripcion("");
+      setMotivo("");
+      void qc.invalidateQueries({ queryKey: ["auditoria"] });
       aviso("Ajuste guardado. Recalcula el periodo afectado para aplicarlo a turnos ya cerrados.");
     },
   });
+  const [motivo, setMotivo] = useState("");
+  const [eliminando, setEliminando] = useState<string | null>(null);
+  const [motivoEliminar, setMotivoEliminar] = useState("");
   const borrar = useMutation({
-    mutationFn: (f: string) => api(`/config/festivos/ajustes/${f}`, { method: "DELETE" }),
+    mutationFn: (f: string) => api(`/config/festivos/ajustes/${f}`, { method: "DELETE", body: { motivo: motivoEliminar } }),
     onSuccess: () => {
       refrescar();
+      setEliminando(null);
+      setMotivoEliminar("");
+      void qc.invalidateQueries({ queryKey: ["auditoria"] });
       aviso("Ajuste eliminado");
     },
   });
@@ -194,12 +203,22 @@ function AjustesFestivos({ anio, ajustes }: { anio: number; ajustes: Festivos["a
           <input type="date" required className="campo" value={fecha} onChange={(e) => setFecha(e.target.value)} aria-label="Fecha" />
           <input className="campo" placeholder="Descripción" value={descripcion} onChange={(e) => setDescripcion(e.target.value)} aria-label="Descripción" />
         </div>
+        <input
+          required
+          minLength={5}
+          className="campo mt-3"
+          placeholder="Motivo (p. ej. decreto, sentencia, acuerdo)"
+          value={motivo}
+          onChange={(e) => setMotivo(e.target.value)}
+          aria-label="Motivo del ajuste"
+        />
         <MensajeError error={guardar.error} />
         <button className="btn btn-primario mt-3" disabled={guardar.isPending}>
           Guardar ajuste
         </button>
+      </form>
         {ajustes.length > 0 && (
-          <ul className="mt-4 divide-y divide-linea border-t border-linea text-[0.92rem]">
+          <ul className="divide-y divide-linea rounded-[10px] border border-linea bg-superficie px-4 text-[0.92rem]">
             {ajustes.map((a) => (
               <li key={a.fecha} className="flex items-center justify-between py-2">
                 <span>
@@ -209,14 +228,29 @@ function AjustesFestivos({ anio, ajustes }: { anio: number; ajustes: Festivos["a
                     {a.descripcion ? `: ${a.descripcion}` : ""}
                   </span>
                 </span>
-                <button className="btn btn-fantasma h-7 px-2" onClick={() => borrar.mutate(a.fecha)}>
-                  Eliminar
-                </button>
+                {eliminando === a.fecha ? (
+                  <form
+                    className="flex gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      borrar.mutate(a.fecha);
+                    }}
+                  >
+                    <input autoFocus required minLength={5} className="campo h-8 w-56" placeholder="Motivo" value={motivoEliminar} onChange={(e) => setMotivoEliminar(e.target.value)} aria-label="Motivo para eliminar el ajuste" />
+                    <button className="btn btn-peligro h-8" disabled={borrar.isPending}>Eliminar</button>
+                    <button type="button" className="btn btn-fantasma h-8" onClick={() => setEliminando(null)}>Cancelar</button>
+                  </form>
+                ) : (
+                  <button type="button" className="btn btn-fantasma h-7 px-2" onClick={() => setEliminando(a.fecha)}>
+                    Eliminar
+                  </button>
+                )}
               </li>
             ))}
           </ul>
         )}
-      </form>
+      <MensajeError error={borrar.error} />
+      <HistorialCambios entidad="festivo" />
 
       <form
         className="rounded-[10px] border border-linea bg-superficie p-4"
