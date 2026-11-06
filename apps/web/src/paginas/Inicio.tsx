@@ -191,25 +191,47 @@ function Cifra({
   );
 }
 
+/** Tramos de cada barra, de abajo arriba. */
+const TRAMOS = [
+  { clave: "ordinarias", texto: "Ordinarias", clase: "bg-petroleo/85" },
+  { clave: "enCurso", texto: "Turnos en curso", clase: "bg-petroleo/35" },
+  { clave: "extraLiquidadas", texto: "Extra liquidadas", clase: "bg-extra" },
+  { clave: "extraPendientes", texto: "Extra por aprobar", clase: "rayado-extra" },
+  { clave: "extraNoReconocidas", texto: "Extra no reconocidas", clase: "bg-linea-fuerte" },
+] as const;
+
+type Dia = Dashboard["serie"][number];
+const totalDia = (s: Dia) => TRAMOS.reduce((t, x) => t + s[x.clave], 0);
+
 function GraficoDias({ serie }: { serie: Dashboard["serie"] }) {
-  const max = Math.max(60, ...serie.map((s) => s.minutosTotales));
+  const max = Math.max(60, ...serie.map(totalDia));
   const alto = 140;
+  const presentes = TRAMOS.filter((t) => serie.some((s) => s[t.clave] > 0));
   return (
     <div>
       <p className="mb-2 text-[0.78rem] text-tinta-tenue tabular-nums">{horasDecimales(max)} h</p>
-      <div className="flex h-[140px] items-end gap-1.5 border-b border-linea" role="img" aria-label="Horas ordinarias y extra por día">
+      <div className="flex h-[140px] items-end gap-1.5 border-b border-linea" role="img" aria-label="Horas trabajadas por día, con las extras según su estado">
         {serie.map((s) => {
-          const total = (s.minutosTotales / max) * alto;
-          const extra = (s.minutosExtra / max) * alto;
           const dom = new Date(`${s.fecha}T12:00:00-05:00`).getUTCDay() === 0;
+          const total = totalDia(s);
           return (
             <div key={s.fecha} className="group relative flex flex-1 flex-col justify-end" style={{ height: alto }}>
-              <div className="rounded-t-[3px] bg-extra" style={{ height: extra }} />
-              <div className="bg-petroleo/85" style={{ height: Math.max(total - extra, 0) }} />
+              <div className="flex flex-col-reverse overflow-hidden rounded-t-[3px]">
+                {TRAMOS.map((t) =>
+                  s[t.clave] > 0 ? <div key={t.clave} className={t.clase} style={{ height: (s[t.clave] / max) * alto }} /> : null,
+                )}
+              </div>
               {(s.festivo || dom) && <div className="absolute -bottom-2 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-noche" />}
-              <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden w-max -translate-x-1/2 rounded bg-tinta px-2 py-1 text-[0.78rem] text-white group-hover:block">
-                {fechaISOCorta(s.fecha)}: {horasDecimales(s.minutosTotales)} h, {horasDecimales(s.minutosExtra)} h extra
-                {s.festivo ? ` (${s.festivo})` : ""}
+              <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 hidden w-max -translate-x-1/2 rounded bg-tinta px-2.5 py-1.5 text-[0.78rem] text-white group-hover:block">
+                <p className="font-semibold">
+                  {fechaISOCorta(s.fecha)}: {horasDecimales(total)} h trabajadas
+                  {s.festivo ? ` (${s.festivo})` : ""}
+                </p>
+                {TRAMOS.filter((t) => s[t.clave] > 0).map((t) => (
+                  <p key={t.clave} className="tabular-nums">
+                    {t.texto}: {horasDecimales(s[t.clave])} h
+                  </p>
+                ))}
               </div>
             </div>
           );
@@ -220,12 +242,11 @@ function GraficoDias({ serie }: { serie: Dashboard["serie"] }) {
         <span>Hoy</span>
       </div>
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[0.8rem] text-tinta-suave">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-3 rounded-sm bg-petroleo/85" /> Ordinarias
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-2.5 w-3 rounded-sm bg-extra" /> Extra
-        </span>
+        {presentes.map((t) => (
+          <span key={t.clave} className="inline-flex items-center gap-1.5">
+            <span className={`h-2.5 w-3 rounded-sm ${t.clase}`} /> {t.texto}
+          </span>
+        ))}
         <span className="inline-flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 rounded-full bg-noche" /> Domingo o festivo
         </span>
