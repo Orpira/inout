@@ -16,7 +16,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:migrate": "npm run db:migrate -w @inout/api",
     "db:generate": "npm run db:generate -w @inout/api",
-    "db:seed": "npm run db:seed -w @inout/api",
+    "db:seed": "npm run db:seed -w @inout/api --",
+    "db:simular": "npm run db:simular -w @inout/api --",
     "migrar:laravel": "npm run migrar:laravel -w @inout/api"
   },
   "devDependencies": {
