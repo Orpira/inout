@@ -112,7 +112,15 @@ export interface Dashboard {
   extrasPendientes: { marcaciones: number; minutos: number };
   offlineRechazadas: number;
   mes: { minutosExtra: number; valor: number; turnos: number };
-  serie: { fecha: string; minutosTotales: number; minutosExtra: number; festivo: string | null }[];
+  serie: {
+    fecha: string;
+    ordinarias: number;
+    extraLiquidadas: number;
+    extraPendientes: number;
+    extraNoReconocidas: number;
+    enCurso: number;
+    festivo: string | null;
+  }[];
   topExtras: { empleadoId: number; nombre: string; minutosExtra: number; valor: number }[];
   ultimas: Marcacion[];
   proximosFestivos: { fecha: string; nombre: string }[];

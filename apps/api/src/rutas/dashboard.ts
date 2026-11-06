@@ -1,5 +1,5 @@
 import { desdeLocal, fechaLocal, parametrosVigentes, sumarDias } from "@inout/core";
-import { and, count, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
 import { empleados, marcaciones, marcasOffline } from "../db/schema.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
 import { columnasMarcacion } from "./marcaciones.js";
@@ -34,14 +34,19 @@ export const rutasDashboard: Rutas = (app, { db, calendario }) => {
         })
         .from(marcaciones)
         .where(and(eq(marcaciones.estado, "CERRADA"), gte(marcaciones.entrada, inicioMes))),
+      // Horas realmente trabajadas por día (sin descanso), separando las extras según su estado.
+      // Los turnos en curso suman el tiempo transcurrido hasta ahora.
       db
         .select({
           fecha: sql<string>`to_char(${marcaciones.entrada} at time zone 'America/Bogota', 'YYYY-MM-DD')`,
-          minutosTotales: sql<number>`coalesce(sum(${marcaciones.minutosTotales}),0)::int`,
-          minutosExtra: sql<number>`coalesce(sum(${marcaciones.minutosExtra}),0)::int`,
+          trabajados: sql<number>`coalesce(sum(${marcaciones.minutosTotales} + coalesce(${marcaciones.minutosExtraCalculados},0) - coalesce(${marcaciones.minutosExtra},0)) filter (where ${marcaciones.estado} = 'CERRADA'),0)::int`,
+          extraCalculadas: sql<number>`coalesce(sum(${marcaciones.minutosExtraCalculados}) filter (where ${marcaciones.estado} = 'CERRADA'),0)::int`,
+          extraLiquidadas: sql<number>`coalesce(sum(${marcaciones.minutosExtra}) filter (where ${marcaciones.estado} = 'CERRADA'),0)::int`,
+          extraPendientes: sql<number>`coalesce(sum(${marcaciones.minutosExtraCalculados}) filter (where ${marcaciones.estado} = 'CERRADA' and ${marcaciones.estadoExtras} = 'PENDIENTE'),0)::int`,
+          enCurso: sql<number>`coalesce(sum(floor(extract(epoch from (now() - ${marcaciones.entrada})) / 60)) filter (where ${marcaciones.estado} = 'ABIERTA'),0)::int`,
         })
         .from(marcaciones)
-        .where(and(eq(marcaciones.estado, "CERRADA"), gte(marcaciones.entrada, inicioSerie)))
+        .where(and(inArray(marcaciones.estado, ["CERRADA", "ABIERTA"]), gte(marcaciones.entrada, inicioSerie)))
         .groupBy(sql`1`),
       db
         .select({
@@ -77,7 +82,19 @@ export const rutasDashboard: Rutas = (app, { db, calendario }) => {
     const dias = Array.from({ length: 14 }, (_, i) => {
       const f = sumarDias(hoy, i - 13);
       const s = porFecha.get(f);
-      return { fecha: f, minutosTotales: s?.minutosTotales ?? 0, minutosExtra: s?.minutosExtra ?? 0, festivo: cal.nombre(f) ?? null };
+      const extraCalculadas = s?.extraCalculadas ?? 0;
+      const extraLiquidadas = s?.extraLiquidadas ?? 0;
+      const extraPendientes = s?.extraPendientes ?? 0;
+      return {
+        fecha: f,
+        ordinarias: (s?.trabajados ?? 0) - extraCalculadas,
+        extraLiquidadas,
+        extraPendientes,
+        /** Rechazadas o dentro de la tolerancia: trabajadas pero no se pagan. */
+        extraNoReconocidas: Math.max(0, extraCalculadas - extraLiquidadas - extraPendientes),
+        enCurso: s?.enCurso ?? 0,
+        festivo: cal.nombre(f) ?? null,
+      };
     });
 
     const proximos = [] as { fecha: string; nombre: string }[];

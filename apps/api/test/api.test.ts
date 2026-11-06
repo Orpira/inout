@@ -352,3 +352,26 @@ describe("auditoría de datos maestros", () => {
     expect(hf.map((x: { accion: string }) => x.accion)).toEqual(["RESTAURAR_FESTIVO", "QUITAR_FESTIVO"]);
   });
 });
+
+describe("gráfica de horas trabajadas del inicio", () => {
+  it("muestra lo trabajado aunque las extras estén por aprobar, y los turnos en curso", async () => {
+    const h = (await api("POST", "/api/horarios", horarioAdministrativo)).json();
+    const { id } = await crearEmpleado({ horarioId: h.id });
+    const ayer = new Date(Date.now() - 24 * 3_600_000);
+    const fecha = ayer.toLocaleDateString("en-CA", { timeZone: "America/Bogota" });
+    const dia = new Date(`${fecha}T12:00:00-05:00`).getUTCDay();
+    // 08:00-19:00 con almuerzo = 10 h trabajadas (8 ordinarias + 2 extra por aprobar si es laborable).
+    await marcarManual(id, fecha, "08:00", "19:00");
+    const { id: id2 } = await crearEmpleado({ identificacion: "2002" });
+    await api("POST", "/api/marcaciones", { empleadoId: id2, entrada: new Date(Date.now() - 90 * 60_000).toISOString(), motivo: "Turno en curso" });
+
+    const serie = (await api("GET", "/api/dashboard")).json().serie as Array<Record<string, number | string>>;
+    const d = serie.find((x) => x.fecha === fecha)!;
+    const trabajadas = Number(d.ordinarias) + Number(d.extraLiquidadas) + Number(d.extraPendientes) + Number(d.extraNoReconocidas);
+    expect(trabajadas).toBe(600);
+    if (dia >= 1 && dia <= 5) expect(d).toMatchObject({ ordinarias: 480, extraPendientes: 120, extraLiquidadas: 0 });
+    const enCurso = serie.reduce((t, x) => t + Number(x.enCurso), 0);
+    expect(enCurso).toBeGreaterThanOrEqual(89);
+    expect(enCurso).toBeLessThanOrEqual(91);
+  });
+});

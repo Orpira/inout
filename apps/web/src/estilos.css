@@ -72,6 +72,15 @@
 }
 
 @layer components {
+  /* Horas extra por aprobar: ámbar rayado, para distinguirlas de las ya liquidadas. */
+  .rayado-extra {
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--color-extra) 0 3px,
+      var(--color-extra-claro) 3px 6px
+    );
+  }
+
   .cifra {
     font-stretch: 125%;
     font-variant-numeric: tabular-nums;
