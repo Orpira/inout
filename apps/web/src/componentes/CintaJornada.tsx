@@ -14,11 +14,29 @@ interface Props {
 
 const MIN_DIA = 24 * 60;
 
+/** Fecha de la ventana de 06:00 a 06:00 que empieza en ese día. */
+function ventanaQueContiene(d: Date) {
+  const l = aHoraLocal(d);
+  return l.hora >= 6 ? l.fecha : sumarDias(l.fecha, -1);
+}
+
+/**
+ * Ventana de 24 h (06:00 → 06:00) en la que se dibuja un turno.
+ * Un turno que cruza las 06:00 (p. ej. 05:00 a 13:00) se dibuja en la ventana donde pasa más
+ * tiempo; si está en curso, en la que contiene "ahora" para que se vea el marcador.
+ */
+export function ventanaDelTurno(ini: Date, fin: Date, abierta = false) {
+  const vIni = ventanaQueContiene(ini);
+  const vFin = ventanaQueContiene(fin);
+  if (abierta || vIni === vFin) return abierta ? vFin : vIni;
+  const corte = desdeLocal(vFin, "06:00").getTime();
+  return corte - ini.getTime() >= fin.getTime() - corte ? vIni : vFin;
+}
+
 export function CintaJornada({ entrada, salida, minutosExtra, variante = "completa", ahora = new Date() }: Props) {
   const ini = new Date(entrada);
   const fin = salida ? new Date(salida) : ahora;
-  const l = aHoraLocal(ini);
-  const fechaVentana = l.hora >= 6 ? l.fecha : sumarDias(l.fecha, -1);
+  const fechaVentana = ventanaDelTurno(ini, fin, !salida);
   const origen = desdeLocal(fechaVentana, "06:00").getTime();
   const nocheDesde = inicioNocturno(fechaVentana) - 6 * 60; // minutos desde las 06:00
 
