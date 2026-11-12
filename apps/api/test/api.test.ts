@@ -1,4 +1,4 @@
-import { desdeLocal } from "@inout/core";
+import { desdeLocal, establecerZona, ZONA_PREDETERMINADA } from "@inout/core";
 import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -40,7 +40,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   app.ctx.calendario.invalidar();
-  await db.execute(sql`truncate marcas_offline, auditoria, liquidacion_lineas, marcaciones, empleados, horarios, usuarios, festivos_ajustes restart identity cascade`);
+  establecerZona(ZONA_PREDETERMINADA);
+  await db.execute(sql`truncate marcas_offline, auditoria, liquidacion_lineas, marcaciones, empleados, horarios, usuarios, festivos_ajustes, ajustes restart identity cascade`);
   await db.insert(usuarios).values([
     { nombre: "Admin", email: "admin@test.co", passwordHash: await hashPassword("clave-admin"), rol: "ADMIN" },
     // Hash generado por Laravel (bcrypt $2y$) para "password"
@@ -373,5 +374,45 @@ describe("gráfica de horas trabajadas del inicio", () => {
     const enCurso = serie.reduce((t, x) => t + Number(x.enCurso), 0);
     expect(enCurso).toBeGreaterThanOrEqual(89);
     expect(enCurso).toBeLessThanOrEqual(91);
+  });
+});
+
+describe("zona horaria de la instalación", () => {
+  it("se cambia desde administración, se audita y rige fechas, franja nocturna y reportes", async () => {
+    const inicial = await api("GET", "/api/config/zona");
+    expect(inicial.json()).toEqual({ zona: "America/Bogota", predeterminada: "America/Bogota" });
+    expect(inicial.headers["x-zona-horaria"]).toBe("America/Bogota");
+
+    expect((await api("PUT", "/api/config/zona", { zona: "Europe/Madrid", motivo: "Sede en España" }, cookieSup)).statusCode).toBe(403);
+    expect((await api("PUT", "/api/config/zona", { zona: "Marte/Olympus", motivo: "Zona inventada" })).statusCode).toBe(400);
+    expect((await api("PUT", "/api/config/zona", { zona: "Europe/Madrid" })).statusCode).toBe(400);
+
+    const cambio = await api("PUT", "/api/config/zona", { zona: "Europe/Madrid", motivo: "Sede en España" });
+    expect(cambio.statusCode).toBe(200);
+    expect(cambio.json().zona).toBe("Europe/Madrid");
+    expect(cambio.headers["x-zona-horaria"]).toBe("Europe/Madrid");
+
+    const hist = (await api("GET", "/api/config/auditoria?entidad=ajuste")).json();
+    expect(hist.datos[0]).toMatchObject({ accion: "CAMBIAR_ZONA_HORARIA", antes: { zona: "America/Bogota" }, despues: { zona: "Europe/Madrid" } });
+
+    // 18:00 a 21:00 en Madrid: 1 h diurna y 2 h nocturnas (desde las 19:00 locales).
+    const { id } = await crearEmpleado();
+    await api("POST", "/api/marcaciones", {
+      empleadoId: id,
+      entrada: "2026-11-04T17:00:00.000Z",
+      salida: "2026-11-04T20:00:00.000Z",
+      motivo: "Turno de prueba en Madrid",
+    });
+    const rep = (await api("GET", "/api/reportes/liquidacion?desde=2026-11-04&hasta=2026-11-04")).json();
+    expect(rep.datos[0].categorias.ORD_DIURNA.minutos).toBe(60);
+    expect(rep.datos[0].categorias.ORD_NOCTURNA.minutos).toBe(120);
+    const marc = (await api("GET", "/api/reportes/marcaciones?desde=2026-11-04&hasta=2026-11-04")).body;
+    expect(marc).toContain("2026-11-04 18:00");
+
+    // Al reiniciar el servidor se conserva la zona guardada.
+    establecerZona(ZONA_PREDETERMINADA);
+    const { app: otra } = await construirApp(env, { db, logger: false });
+    expect(otra.ctx.ajustes.zona()).toBe("Europe/Madrid");
+    await otra.close();
   });
 });

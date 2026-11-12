@@ -1,10 +1,12 @@
 import {
+  esZonaValida,
   fechaLocal,
   festivosColombia,
   INICIO_NOCTURNO,
   JORNADA_SEMANAL,
   parametrosVigentes,
   RECARGO_DOMINICAL,
+  ZONA_PREDETERMINADA,
 } from "@inout/core";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -14,8 +16,44 @@ import { auditar, idFecha, motivoObligatorio } from "../servicios/auditoria.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
 import { fechaISO } from "./marcaciones.js";
 
-export const rutasConfig: Rutas = (app, { db, calendario }) => {
+export const rutasConfig: Rutas = (app, { db, calendario, ajustes }) => {
   const r = zapp(app);
+
+  /** Zona horaria de la instalación: rige el kiosko, el panel y la liquidación. */
+  r.get("/zona", { onRequest: requiereSesion() }, async () => ({ zona: ajustes.zona(), predeterminada: ZONA_PREDETERMINADA }));
+
+  r.put(
+    "/zona",
+    {
+      onRequest: requiereSesion("ADMIN"),
+      schema: {
+        body: z.object({
+          zona: z.string().trim().refine(esZonaValida, "Zona horaria no válida"),
+          motivo: motivoObligatorio,
+        }),
+      },
+    },
+    async (req) => {
+      const anterior = ajustes.zona();
+      const { zona, motivo } = req.body;
+      if (zona !== anterior) {
+        await db.transaction(async (tx) => {
+          await ajustes.guardarZona(tx, zona);
+          await auditar(tx, {
+            entidad: "ajuste",
+            entidadId: 1,
+            usuarioId: req.user.id,
+            accion: "CAMBIAR_ZONA_HORARIA",
+            motivo,
+            antes: { zona: anterior },
+            despues: { zona },
+          });
+        });
+        ajustes.aplicarZona(zona);
+      }
+      return { zona: ajustes.zona(), predeterminada: ZONA_PREDETERMINADA };
+    },
+  );
 
   r.get(
     "/parametros",
@@ -112,7 +150,7 @@ export const rutasConfig: Rutas = (app, { db, calendario }) => {
       onRequest: requiereSesion(),
       schema: {
         querystring: z.object({
-          entidad: z.enum(["empleado", "horario", "festivo"]),
+          entidad: z.enum(["empleado", "horario", "festivo", "ajuste"]),
           entidadId: z.coerce.number().int().optional(),
         }),
       },

@@ -21,6 +21,7 @@ import { rutasKiosko } from "./rutas/kiosko.js";
 import { rutasMarcaciones } from "./rutas/marcaciones.js";
 import { rutasReportes } from "./rutas/reportes.js";
 import { rutasUsuarios } from "./rutas/usuarios.js";
+import { ServicioAjustes } from "./servicios/ajustes.js";
 import { ServicioCalendario } from "./servicios/calendario.js";
 import { ServicioMarcaciones } from "./servicios/marcaciones.js";
 import { ServicioOffline } from "./servicios/offline.js";
@@ -28,8 +29,10 @@ import { ServicioOffline } from "./servicios/offline.js";
 export async function construirApp(env: Env, opciones: { db?: Db; logger?: boolean } = {}) {
   const { db, cliente } = opciones.db ? { db: opciones.db, cliente: null } : crearDb(env.DATABASE_URL);
   const calendario = new ServicioCalendario();
+  const ajustes = new ServicioAjustes();
+  await ajustes.cargar(db);
   const svcMarcaciones = new ServicioMarcaciones(db, calendario, env);
-  const ctx: Contexto = { db, env, calendario, marcaciones: svcMarcaciones, offline: new ServicioOffline(db, svcMarcaciones) };
+  const ctx: Contexto = { db, env, calendario, ajustes, marcaciones: svcMarcaciones, offline: new ServicioOffline(db, svcMarcaciones) };
 
   const app = Fastify({
     logger: opciones.logger ?? env.NODE_ENV !== "test",
@@ -86,6 +89,11 @@ export async function construirApp(env: Env, opciones: { db?: Db; logger?: boole
     }
     req.log.error(err);
     return reply.status(500).send({ error: "Error interno del servidor", codigo: "INTERNO" });
+  });
+
+  // La web (panel y kiosko) toma de aquí la zona horaria vigente, también al reconectar.
+  app.addHook("onSend", async (req, reply) => {
+    if (req.url.startsWith("/api/")) reply.header("x-zona-horaria", ajustes.zona());
   });
 
   app.get("/api/salud", async () => {

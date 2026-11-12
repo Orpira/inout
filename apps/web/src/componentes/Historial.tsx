@@ -19,6 +19,7 @@ const ACCIONES: Record<string, string> = {
   AGREGAR_FESTIVO: "Festivo añadido",
   QUITAR_FESTIVO: "Festivo quitado",
   RESTAURAR_FESTIVO: "Ajuste eliminado",
+  CAMBIAR_ZONA_HORARIA: "Zona horaria cambiada",
 };
 
 const CAMPOS: Record<string, string> = {
@@ -37,6 +38,7 @@ const CAMPOS: Record<string, string> = {
   descanso: "Descanso",
   toleranciaMinutos: "Tolerancia (min)",
   requiereAprobacion: "Requiere aprobación",
+  zona: "Zona horaria",
 };
 
 function valor(campo: string, v: unknown): string {
@@ -48,7 +50,7 @@ function valor(campo: string, v: unknown): string {
 }
 
 /** Historial de cambios auditados de un empleado, un horario o los festivos. */
-export function HistorialCambios({ entidad, entidadId }: { entidad: "empleado" | "horario" | "festivo"; entidadId?: number }) {
+export function HistorialCambios({ entidad, entidadId }: { entidad: "empleado" | "horario" | "festivo" | "ajuste"; entidadId?: number }) {
   const q = useQuery({
     queryKey: ["auditoria", entidad, entidadId],
     queryFn: () => api<{ datos: Evento[] }>(`/config/auditoria?entidad=${entidad}${entidadId ? `&entidadId=${entidadId}` : ""}`),
@@ -59,7 +61,7 @@ export function HistorialCambios({ entidad, entidadId }: { entidad: "empleado" |
       <h3 className="mb-2 font-bold">Historial de cambios</h3>
       <ol className="max-h-64 space-y-3 overflow-y-auto border-l-2 border-linea pl-4">
         {q.data.datos.map((e) => {
-          const campos = e.accion === "EDITAR" ? Object.keys(e.despues ?? {}) : [];
+          const campos = e.accion === "EDITAR" || e.accion === "CAMBIAR_ZONA_HORARIA" ? Object.keys(e.despues ?? {}) : [];
           return (
             <li key={e.id} className="text-[0.9rem]">
               <p>

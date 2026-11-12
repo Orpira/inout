@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
+  aHoraLocal,
   crearCalendario,
+  esZonaValida,
+  establecerZona,
+  fechaLocal,
+  ZONA_PREDETERMINADA,
+  zonaHoraria,
   desdeLocal,
   divisorMensual,
   domingoDePascua,
@@ -288,5 +294,58 @@ describe("horarios: administrativo fijo y operativo de bodega", () => {
     expect(minutos(r, "EXT_NOCTURNA")).toBe(60); // 05:00-06:00
     expect(minutos(r, "EXT_DIURNA")).toBe(120); // 06:00-08:00
     expect(r.alertas.join(" ")).toMatch(/2 horas extra/);
+  });
+});
+
+describe("zona horaria configurable", () => {
+  afterEach(() => establecerZona(ZONA_PREDETERMINADA));
+
+  it("por defecto usa la hora de Colombia", () => {
+    expect(zonaHoraria()).toBe("America/Bogota");
+    expect(desdeLocal("2026-11-05", "21:03").toISOString()).toBe("2026-11-06T02:03:00.000Z");
+    expect(fechaLocal(new Date("2026-11-06T02:03:00Z"))).toBe("2026-11-05");
+  });
+
+  it("valida zonas IANA", () => {
+    expect(esZonaValida("Europe/Madrid")).toBe(true);
+    expect(esZonaValida("America/Argentina/Buenos_Aires")).toBe(true);
+    expect(esZonaValida("Marte/Olympus")).toBe(false);
+    expect(esZonaValida("x'; drop table")).toBe(false);
+    expect(() => establecerZona("Nada/Nada")).toThrow();
+  });
+
+  it("aplica el horario de verano de España", () => {
+    establecerZona("Europe/Madrid");
+    expect(desdeLocal("2026-07-01", "08:00").toISOString()).toBe("2026-07-01T06:00:00.000Z");
+    expect(desdeLocal("2026-12-01", "08:00").toISOString()).toBe("2026-12-01T07:00:00.000Z");
+    expect(fechaLocal(new Date("2026-11-05T23:30:00Z"))).toBe("2026-11-06");
+    // 02:30 no existe el 29-mar-2026: se adelanta a las 03:30.
+    expect(aHoraLocal(desdeLocal("2026-03-29", "02:30")).hora).toBe(3);
+    // 02:30 se repite el 25-oct-2026: se toma la primera.
+    expect(desdeLocal("2026-10-25", "02:30").toISOString()).toBe("2026-10-25T00:30:00.000Z");
+  });
+
+  it("la franja nocturna se evalúa en la hora local de la zona", () => {
+    establecerZona("Europe/Madrid");
+    const r = liquidar({
+      entrada: desdeLocal("2026-11-10", "18:00"),
+      salida: desdeLocal("2026-11-10", "21:00"),
+      salarioMensual: 2_100_000,
+      calendario: cal,
+    });
+    expect(minutos(r, "ORD_DIURNA")).toBe(60);
+    expect(minutos(r, "ORD_NOCTURNA")).toBe(120);
+  });
+
+  it("un turno que cruza el cambio de hora cuenta el tiempo real", () => {
+    establecerZona("Europe/Madrid");
+    const r = liquidar({
+      entrada: desdeLocal("2026-10-24", "22:00"),
+      salida: desdeLocal("2026-10-25", "06:00"),
+      salarioMensual: 2_100_000,
+      calendario: cal,
+      minutosOrdinariosDia: 600,
+    });
+    expect(r.minutosPresencia).toBe(9 * 60);
   });
 });

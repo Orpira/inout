@@ -1,4 +1,4 @@
-import { CalendarClock, CalendarCog, ClipboardList, Clock3, LayoutGrid, LogOut, Menu, ReceiptText, Tablet, Users, UserCog } from "lucide-react";
+import { CalendarClock, CalendarCog, ClipboardList, Clock3, Globe2, LayoutGrid, LogOut, Menu, ReceiptText, Tablet, Users, UserCog } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Navigate, Outlet, useLocation } from "react-router";
 import { useSesion } from "../lib/sesion";
@@ -12,6 +12,7 @@ const NAV = [
   { a: "/horarios", texto: "Horarios", icono: CalendarClock },
   { a: "/configuracion", texto: "Festivos y normas", icono: CalendarCog },
   { a: "/usuarios", texto: "Usuarios", icono: UserCog, soloAdmin: true },
+  { a: "/zona-horaria", texto: "Zona horaria", icono: Globe2, soloAdmin: true },
 ];
 
 export function Marca({ claro = false }: { claro?: boolean }) {

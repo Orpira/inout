@@ -6,7 +6,8 @@ import type { Usuario } from "./tipos";
 interface Sesion {
   usuario: Usuario | null;
   cargando: boolean;
-  entrar: (email: string, password: string) => Promise<void>;
+  /** `antesDeEntrar` se ejecuta con la sesión ya abierta en el servidor, antes de mostrar el panel. */
+  entrar: (email: string, password: string, antesDeEntrar?: (u: Usuario) => Promise<void>) => Promise<Usuario>;
   salir: () => Promise<void>;
 }
 
@@ -29,9 +30,11 @@ export function ProveedorSesion({ children }: { children: ReactNode }) {
   const valor: Sesion = {
     usuario: me.data ?? null,
     cargando: me.isPending,
-    entrar: async (email, password) => {
+    entrar: async (email, password, antesDeEntrar) => {
       const r = await api<{ usuario: Usuario }>("/auth/login", { body: { email, password } });
+      await antesDeEntrar?.(r.usuario);
       qc.setQueryData(["me"], r.usuario);
+      return r.usuario;
     },
     salir: async () => {
       await api("/auth/logout", { method: "POST" }).catch(() => {});

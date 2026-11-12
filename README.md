@@ -128,6 +128,14 @@ En el análisis, la zona correcta es la columna cuyo pico coincide con la hora r
 - **Trazabilidad:** cada marcación migrada guarda en la auditoría el registro original con sus horas tal cual estaban.
 - **Seguridad:** el script se niega a escribir si la base destino ya tiene datos.
 
+## Ubicación y zona horaria
+
+La instalación trabaja con una sola zona horaria (IANA; Bogotá es la predeterminada). Rige el reloj del kiosko, las fechas del panel, los reportes y la liquidación: día del turno, franja nocturna y festivos. Las normas laborales son siempre las de Colombia.
+
+- **Al iniciar sesión**: el campo "Ubicación" muestra la zona vigente, su desfase respecto a UTC y la hora actual allí. Si el dispositivo está en otra zona, ofrece usarla. El cambio se guarda solo si quien entra es ADMIN y queda en la auditoría; a un supervisor se le avisa de que la ubicación no cambia.
+- **Menú "Zona horaria"** (ADMIN): el mismo cambio con motivo propio, más el historial.
+- Cambiar la zona no recalcula las liquidaciones cerradas: se recalculan desde "Festivos y normas".
+
 ## Auditoría
 
 Todo cambio queda en la tabla `auditoria` con usuario, fecha, motivo y valores antes y después: correcciones, anulaciones y aprobaciones de marcaciones; altas y cambios de empleados (incluido el salario); horarios; y ajustes de festivos. Los cambios de empleados, horarios y festivos exigen motivo y se consultan en su propia pantalla.
