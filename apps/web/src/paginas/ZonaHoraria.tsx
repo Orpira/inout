@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { HistorialCambios } from "../componentes/Historial";
 import { Cargando, Encabezado, MensajeError, useAviso } from "../componentes/ui";
 import { api } from "../lib/api";
 import { useSesion } from "../lib/sesion";
-import { aplicarZona, nombreZona, textoDesfase, todasLasZonas, ZONAS_SUGERIDAS } from "../lib/zona";
+import { SelectorZona } from "../componentes/SelectorZona";
+import { aplicarZona, nombreZona, textoDesfase } from "../lib/zona";
 
 interface RespuestaZona {
   zona: string;
@@ -37,11 +38,6 @@ export default function ZonaHoraria() {
   useEffect(() => {
     if (zonaGuardada) setZona(zonaGuardada);
   }, [zonaGuardada]);
-
-  const otras = useMemo(() => {
-    const sugeridas = new Set(ZONAS_SUGERIDAS.map((z) => z.zona));
-    return todasLasZonas().filter((z) => !sugeridas.has(z));
-  }, []);
 
   const guardar = useMutation({
     mutationFn: () => api<RespuestaZona>("/config/zona", { method: "PUT", body: { zona, motivo } }),
@@ -89,24 +85,7 @@ export default function ZonaHoraria() {
           <label className="etiqueta mt-3" htmlFor="zona">
             Zona
           </label>
-          <select id="zona" className="campo" value={zona} onChange={(e) => setZona(e.target.value)}>
-            <optgroup label="Frecuentes">
-              {ZONAS_SUGERIDAS.map((z) => (
-                <option key={z.zona} value={z.zona}>
-                  {z.nombre} ({textoDesfase(z.zona)})
-                </option>
-              ))}
-            </optgroup>
-            {otras.length > 0 && (
-              <optgroup label="Todas las zonas">
-                {otras.map((z) => (
-                  <option key={z} value={z}>
-                    {z.replace(/_/g, " ")}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </select>
+          <SelectorZona id="zona" valor={zona} onCambiar={setZona} />
           <p className="mt-2 text-[0.9rem] text-tinta-suave">
             Hora en esa zona ahora: <span className="font-medium text-tinta">{relojSeleccion}</span>
           </p>

@@ -1,8 +1,27 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
 import { Marca } from "../componentes/Marco";
-import { MensajeError } from "../componentes/ui";
+import { SelectorZona } from "../componentes/SelectorZona";
+import { MensajeError, useAviso } from "../componentes/ui";
+import { api, ErrorApi } from "../lib/api";
 import { useSesion } from "../lib/sesion";
+import { aplicarZona, nombreZona, textoDesfase, useZona, zonaDelDispositivo } from "../lib/zona";
+
+const MOTIVO_UBICACION = "Ubicación definida al iniciar sesión";
+
+/** Hora actual en una zona, para comprobar la ubicación antes de entrar. */
+function useHoraEn(zona: string) {
+  const [ahora, setAhora] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setAhora(new Date()), 15_000);
+    return () => clearInterval(t);
+  }, []);
+  try {
+    return new Intl.DateTimeFormat("es-CO", { timeZone: zona, weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false }).format(ahora);
+  } catch {
+    return "";
+  }
+}
 
 export default function Login() {
   const { usuario, entrar } = useSesion();
@@ -12,6 +31,13 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<unknown>(null);
   const [enviando, setEnviando] = useState(false);
+  const aviso = useAviso();
+  // Ubicación de la instalación: la que ya rige (llega con cada respuesta del servidor) hasta que se elija otra.
+  const zonaActual = useZona();
+  const [zona, setZona] = useState(zonaActual);
+  const cambia = zona !== zonaActual;
+  const detectada = zonaDelDispositivo();
+  const horaEnZona = useHoraEn(zona);
 
   if (usuario) return <Navigate to="/" replace />;
 
@@ -20,7 +46,21 @@ export default function Login() {
     setEnviando(true);
     setError(null);
     try {
-      await entrar(email, password);
+      // La ubicación se guarda con la sesión ya abierta y antes de mostrar el panel, para que cargue con la hora correcta.
+      await entrar(email, password, async (u) => {
+        if (!cambia) return;
+        if (u.rol !== "ADMIN") {
+          aviso(`La ubicación sigue en ${nombreZona(zonaActual)}: solo un administrador puede cambiarla.`, "error");
+          return;
+        }
+        try {
+          const r = await api<{ zona: string }>("/config/zona", { method: "PUT", body: { zona, motivo: MOTIVO_UBICACION } });
+          aplicarZona(r.zona);
+          aviso(`Ubicación cambiada a ${nombreZona(r.zona)} (${textoDesfase(r.zona)})`);
+        } catch (err) {
+          aviso(`No se pudo cambiar la ubicación: ${err instanceof ErrorApi ? err.message : "error inesperado"}. Puedes hacerlo en Zona horaria.`, "error");
+        }
+      });
       nav((loc.state as { desde?: string } | null)?.desde ?? "/", { replace: true });
     } catch (err) {
       setError(err);
@@ -75,6 +115,29 @@ export default function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
+          </div>
+          <div>
+            <label className="etiqueta" htmlFor="ubicacion">
+              Ubicación
+            </label>
+            <SelectorZona id="ubicacion" className="campo h-10" valor={zona} onCambiar={setZona} />
+            <p className="mt-1.5 text-[0.88rem] text-tinta-suave">
+              {textoDesfase(zona)} · ahora: <span className="font-medium text-tinta">{horaEnZona}</span>
+            </p>
+            {detectada && detectada !== zona && (
+              <p className="mt-1 text-[0.88rem] text-tinta-suave">
+                Este dispositivo está en {nombreZona(detectada)}.{" "}
+                <button type="button" className="font-semibold text-petroleo underline-offset-2 hover:underline" onClick={() => setZona(detectada)}>
+                  Usar esta ubicación
+                </button>
+              </p>
+            )}
+            {cambia && (
+              <p className="mt-2 rounded-md border border-extra bg-extra-claro p-2.5 text-[0.88rem]" role="status">
+                Al entrar como administrador, toda la instalación pasará de {nombreZona(zonaActual)} a {nombreZona(zona)}: kiosko, panel y
+                liquidación. Las normas laborales siguen siendo las de Colombia.
+              </p>
+            )}
           </div>
           <button className="btn btn-primario h-10 w-full" disabled={enviando}>
             {enviando ? "Entrando…" : "Entrar"}

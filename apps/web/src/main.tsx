@@ -52,9 +52,10 @@ function ConZona({ children }: { children: ReactNode }) {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={qc}>
-      <ConZona>
-        <ProveedorAvisos>
-          <BrowserRouter>
+      {/* Avisos y navegación quedan fuera de ConZona: un cambio de zona no debe perder el aviso ni la ruta. */}
+      <ProveedorAvisos>
+        <BrowserRouter>
+          <ConZona>
             <Suspense fallback={<Cargando />}>
               <Routes>
                 <Route path="/kiosko" element={<Kiosko />} />
@@ -81,9 +82,9 @@ createRoot(document.getElementById("root")!).render(
                 />
               </Routes>
             </Suspense>
-          </BrowserRouter>
-        </ProveedorAvisos>
-      </ConZona>
+          </ConZona>
+        </BrowserRouter>
+      </ProveedorAvisos>
     </QueryClientProvider>
   </StrictMode>,
 );

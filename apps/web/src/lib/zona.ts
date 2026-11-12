@@ -75,3 +75,13 @@ export function textoDesfase(zona: string, fecha = new Date()): string {
     return "";
   }
 }
+
+/** Zona horaria del dispositivo según el navegador (su ubicación más probable). */
+export function zonaDelDispositivo(): string | null {
+  try {
+    const z = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return z && esZonaValida(z) ? z : null;
+  } catch {
+    return null;
+  }
+}
