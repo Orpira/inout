@@ -91,7 +91,7 @@ if (process.argv.includes("--demo")) {
     for (const e of [insertados[0]!, insertados[1]!, insertados[4]!]) {
       await db.insert(marcaciones).values({ empleadoId: e.id, entrada: new Date(Date.now() - 3 * 3_600_000), estado: "ABIERTA" });
     }
-    const n = await svc.recalcularRango(sumarDias(hoy, -14), hoy);
+    const { recalculados: n } = await svc.recalcularRango(sumarDias(hoy, -14), hoy);
     console.log(`✔ Datos de demostración: ${insertados.length} empleados, 2 horarios, ${n} días liquidados`);
   }
 }

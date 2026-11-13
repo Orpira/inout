@@ -177,10 +177,13 @@ function AjustesFestivos({ anio, ajustes }: { anio: number; ajustes: Festivos["a
   });
   const [rango, setRango] = useState({ desde: `${anio}-01-01`, hasta: hoyLocal() });
   const recalcular = useMutation({
-    mutationFn: () => api<{ diasRecalculados: number }>("/marcaciones/recalcular", { body: rango }),
+    mutationFn: () => api<{ diasRecalculados: number; diasOmitidosPorLiquidados: number }>("/marcaciones/recalcular", { body: rango }),
     onSuccess: (r) => {
       void qc.invalidateQueries();
-      aviso(`Liquidación recalculada en ${r.diasRecalculados} días-empleado`);
+      aviso(
+        `Liquidación recalculada en ${r.diasRecalculados} días-empleado` +
+          (r.diasOmitidosPorLiquidados ? `. Se omitieron ${r.diasOmitidosPorLiquidados} de periodos ya liquidados.` : ""),
+      );
     },
   });
 

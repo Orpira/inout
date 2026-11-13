@@ -40,7 +40,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   app.ctx.calendario.invalidar();
-  await db.execute(sql`truncate marcas_offline, auditoria, liquidacion_lineas, marcaciones, empleados, horarios, usuarios, festivos_ajustes restart identity cascade`);
+  await db.execute(sql`truncate periodos_liquidados, marcas_offline, auditoria, liquidacion_lineas, marcaciones, empleados, horarios, usuarios, festivos_ajustes restart identity cascade`);
   await db.insert(usuarios).values([
     { nombre: "Admin", email: "admin@test.co", passwordHash: await hashPassword("clave-admin"), rol: "ADMIN" },
     // Hash generado por Laravel (bcrypt $2y$) para "password"
@@ -392,5 +392,98 @@ describe("gráfica de horas trabajadas del inicio", () => {
     const enCurso = serie.reduce((t, x) => t + Number(x.enCurso), 0);
     expect(enCurso).toBeGreaterThanOrEqual(89);
     expect(enCurso).toBeLessThanOrEqual(91);
+  });
+});
+
+describe("cierre de periodos liquidados", () => {
+  const P = { desde: "2026-10-01", hasta: "2026-10-15" };
+  const reporte = async (hasta = P.hasta, extra = "") => api("GET", `/api/reportes/liquidacion?desde=${P.desde}&hasta=${hasta}${extra}`);
+
+  it("avisa de los turnos por revisar, cierra, deja el periodo en solo consulta y permite reabrir con motivo", async () => {
+    const { id } = await crearEmpleado();
+    const cerrado = (await api("POST", "/api/marcaciones", {
+      empleadoId: id,
+      entrada: desdeLocal("2026-10-05", "08:00").toISOString(),
+      salida: desdeLocal("2026-10-05", "18:00").toISOString(),
+      motivo: "Turno normal con extras",
+    })).json();
+    const sinSalida = (await api("POST", "/api/marcaciones", {
+      empleadoId: id,
+      entrada: desdeLocal("2026-10-06", "08:00").toISOString(),
+      motivo: "Olvidó marcar la salida",
+    })).json();
+    expect(await app.ctx.marcaciones.enviarVencidasARevision()).toBe(1);
+
+    // El reporte y el CSV señalan el turno que no está incluido
+    const rep = (await reporte()).json();
+    expect(rep.pendientes).toMatchObject({ porRevisar: 1, enTurno: 0, extrasPorAprobar: 0, total: 1 });
+    expect(rep.datos[0]).toMatchObject({ turnos: 1, turnosPorRevisar: 1 });
+    expect(rep.cierre.estado).toBe("ABIERTO");
+    const csv = (await reporte(P.hasta, "&formato=csv")).body.split("\r\n");
+    const col = csv[0]!.split(";").indexOf("Turnos por revisar (no incluidos)");
+    expect(csv[1]!.split(";")[col]).toBe("1");
+
+    // Solo un administrador cierra, y no con pendientes ni con el periodo sin terminar
+    expect((await api("POST", "/api/periodos", P, cookieSup)).statusCode).toBe(403);
+    const conPendientes = await api("POST", "/api/periodos", P);
+    expect(conPendientes.statusCode).toBe(409);
+    expect(conPendientes.json().codigo).toBe("PERIODO_CON_PENDIENTES");
+    expect((await api("POST", "/api/periodos", { desde: "2026-10-01", hasta: "2100-01-01" })).statusCode).toBe(400);
+
+    await api("PATCH", `/api/marcaciones/${sinSalida.id}`, { salida: desdeLocal("2026-10-06", "15:00").toISOString(), motivo: "Salida confirmada por el jefe" });
+    const cierre = await api("POST", "/api/periodos", { ...P, nota: "Nómina primera quincena" });
+    expect(cierre.statusCode).toBe(201);
+    expect(cierre.json().resumen).toMatchObject({ empleados: 1, turnos: 2, valorTotal: 37_500 });
+    expect(cierre.json().detalle).toHaveLength(1);
+
+    // Solo consulta: nada del periodo se puede crear, corregir, anular ni recalcular
+    const bloqueos = [
+      await api("POST", "/api/marcaciones", { empleadoId: id, entrada: desdeLocal("2026-10-07", "08:00").toISOString(), salida: desdeLocal("2026-10-07", "12:00").toISOString(), motivo: "Turno olvidado" }),
+      await api("PATCH", `/api/marcaciones/${cerrado.id}`, { salida: desdeLocal("2026-10-05", "20:00").toISOString(), motivo: "Corrección tardía" }),
+      await api("POST", `/api/marcaciones/${cerrado.id}/anular`, { motivo: "Anulación tardía" }),
+    ];
+    for (const b of bloqueos) {
+      expect(b.statusCode).toBe(409);
+      expect(b.json().codigo).toBe("PERIODO_LIQUIDADO");
+    }
+    // Tampoco se puede mover hacia el periodo liquidado un turno de fuera
+    const fuera = (await api("POST", "/api/marcaciones", { empleadoId: id, entrada: desdeLocal("2026-10-19", "08:00").toISOString(), salida: desdeLocal("2026-10-19", "12:00").toISOString(), motivo: "Turno posterior" })).json();
+    const mover = await api("PATCH", `/api/marcaciones/${fuera.id}`, { entrada: desdeLocal("2026-10-14", "08:00").toISOString(), salida: desdeLocal("2026-10-14", "12:00").toISOString(), motivo: "Fecha equivocada" });
+    expect(mover.json().codigo).toBe("PERIODO_LIQUIDADO");
+    // Un cambio de salario no altera lo ya liquidado
+    await api("PUT", `/api/empleados/${id}`, { identificacion: "1001", nombre: "Laura", apellido: "Gómez", salario: 4_200_000, horarioId: null, motivo: "Aumento posterior al cierre" });
+    const recalculo = (await api("POST", "/api/marcaciones/recalcular", { desde: "2026-10-01", hasta: "2026-10-31" })).json();
+    expect(recalculo).toEqual({ diasRecalculados: 1, diasOmitidosPorLiquidados: 2 });
+    expect((await reporte()).json().totales.valorTotal).toBe(37_500);
+
+    // Volver a elegir días ya liquidados: no se puede cerrar de nuevo ni descargar un rango mezclado
+    const solape = await api("POST", "/api/periodos", { desde: "2026-10-10", hasta: "2026-10-20" });
+    expect(solape.json().codigo).toBe("PERIODO_SOLAPADO");
+    expect((await reporte()).json().cierre.estado).toBe("LIQUIDADO");
+    expect((await reporte("2026-10-20")).json().cierre.estado).toBe("MIXTO");
+    expect((await reporte("2026-10-20", "&formato=csv")).json().codigo).toBe("PERIODO_MIXTO");
+    expect((await reporte(P.hasta, "&formato=csv")).body).toContain("Liquidado");
+
+    // Reabrir exige motivo y deja historial; al volver a cerrar hay dos liquidaciones del mismo periodo
+    const pid = cierre.json().id;
+    expect((await api("POST", `/api/periodos/${pid}/reabrir`, { motivo: "" })).statusCode).toBe(400);
+    expect((await api("POST", `/api/periodos/${pid}/reabrir`, { motivo: "Faltó registrar horas extra del día 5" }, cookieSup)).statusCode).toBe(403);
+    expect((await api("POST", `/api/periodos/${pid}/reabrir`, { motivo: "Faltó registrar horas extra del día 5" })).statusCode).toBe(200);
+    expect((await api("POST", `/api/periodos/${pid}/reabrir`, { motivo: "Segunda vez, no debe dejar" })).statusCode).toBe(409);
+    const corregir = await api("PATCH", `/api/marcaciones/${cerrado.id}`, { salida: desdeLocal("2026-10-05", "19:00").toISOString(), motivo: "Salió una hora más tarde" });
+    expect(corregir.statusCode).toBe(200);
+    const segundo = await api("POST", "/api/periodos", P);
+    expect(segundo.statusCode).toBe(201);
+    expect(segundo.json().resumen.valorTotal).toBeGreaterThan(37_500);
+
+    const historial = (await api("GET", "/api/periodos", undefined, cookieSup)).json().datos;
+    expect(historial).toHaveLength(2);
+    const anterior = historial.find((h: { id: number }) => h.id === pid);
+    expect(anterior).toMatchObject({ vigente: false, motivoReapertura: "Faltó registrar horas extra del día 5", reabiertoPorNombre: "Admin", cerradoPorNombre: "Admin" });
+    expect(anterior.resumen.valorTotal).toBe(37_500);
+    expect(historial.filter((h: { vigente: boolean }) => h.vigente)).toHaveLength(1);
+
+    const audit = await db.execute(sql`select accion from auditoria where entidad = 'periodo' order by id`);
+    expect(audit.map((a) => a.accion)).toEqual(["CERRAR_PERIODO", "REABRIR_PERIODO", "CERRAR_PERIODO"]);
   });
 });

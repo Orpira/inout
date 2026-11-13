@@ -231,6 +231,9 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
       onRequest: requiereSesion("ADMIN"),
       schema: { body: z.object({ desde: fechaISO, hasta: fechaISO, empleadoId: z.number().int().optional() }) },
     },
-    async (req) => ({ diasRecalculados: await ctx.marcaciones.recalcularRango(req.body.desde, req.body.hasta, req.body.empleadoId) }),
+    async (req) => {
+      const r = await ctx.marcaciones.recalcularRango(req.body.desde, req.body.hasta, req.body.empleadoId);
+      return { diasRecalculados: r.recalculados, diasOmitidosPorLiquidados: r.omitidos };
+    },
   );
 };

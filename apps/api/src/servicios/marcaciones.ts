@@ -13,6 +13,7 @@ import {
 import type { Env } from "../env.js";
 import { conflicto, noEncontrado, solicitudInvalida } from "../errores.js";
 import type { ServicioCalendario } from "./calendario.js";
+import { exigirPeriodoAbierto, periodosVigentes } from "./periodos.js";
 
 export type TipoMarca = "ENTRADA" | "SALIDA";
 
@@ -152,11 +153,13 @@ export class ServicioMarcaciones {
   }
 
   private async crearEntrada(tx: DbTx, empleadoId: number, entrada: Date, origen: Marcacion["origen"]) {
+    await exigirPeriodoAbierto(tx, fechaLocal(entrada));
     const [m] = await tx.insert(marcaciones).values({ empleadoId, entrada, origen, estado: "ABIERTA" }).returning();
     return m!;
   }
 
   private async cerrar(tx: DbTx, m: Marcacion, salida: Date): Promise<Marcacion> {
+    await exigirPeriodoAbierto(tx, fechaLocal(m.entrada));
     await tx.update(marcaciones).set({ salida, estado: "CERRADA" }).where(eq(marcaciones.id, m.id));
     await this.recalcularDia(tx, m.empleadoId, fechaLocal(m.entrada));
     const [actual] = await tx.select().from(marcaciones).where(eq(marcaciones.id, m.id));
@@ -171,6 +174,8 @@ export class ServicioMarcaciones {
    * asignado al empleado (o de la jornada legal L-S si no tiene horario).
    */
   async recalcularDia(tx: DbTx, empleadoId: number, fecha: string) {
+    // Última barrera: lo liquidado no se recalcula (ni con otro salario ni con otros festivos).
+    await exigirPeriodoAbierto(tx, fecha);
     const [fila] = await tx
       .select({ empleado: empleados, horario: horarios })
       .from(empleados)
@@ -293,6 +298,7 @@ export class ServicioMarcaciones {
     return this.db.transaction(async (tx) => {
       const [m] = await tx.select().from(marcaciones).where(eq(marcaciones.id, id));
       if (!m) throw noEncontrado("Marcación");
+      await exigirPeriodoAbierto(tx, fechaLocal(m.entrada));
       if (!["PENDIENTE", "APROBADAS", "RECHAZADAS"].includes(m.estadoExtras ?? "")) {
         throw conflicto("Esta marcación no tiene horas extra por aprobar.");
       }
@@ -332,8 +338,12 @@ export class ServicioMarcaciones {
     return n;
   }
 
-  /** Recalcula todas las marcaciones cerradas en un rango (p. ej. tras cambiar festivos o salarios). */
+  /**
+   * Recalcula todas las marcaciones cerradas en un rango (p. ej. tras cambiar festivos o salarios).
+   * Los días de periodos ya liquidados se omiten: conservan los valores con los que se pagaron.
+   */
   async recalcularRango(desde: string, hasta: string, empleadoId?: number) {
+    const liquidados = await periodosVigentes(this.db, desde, hasta);
     const filas = await this.db
       .selectDistinct({
         empleadoId: marcaciones.empleadoId,
@@ -347,10 +357,17 @@ export class ServicioMarcaciones {
           empleadoId ? eq(marcaciones.empleadoId, empleadoId) : undefined,
         ),
       );
+    let recalculados = 0;
+    let omitidos = 0;
     for (const f of filas) {
+      if (liquidados.some((p) => p.desde <= f.fecha && f.fecha <= p.hasta)) {
+        omitidos++;
+        continue;
+      }
       await this.db.transaction((tx) => this.recalcularDia(tx, f.empleadoId, f.fecha));
+      recalculados++;
     }
-    return filas.length;
+    return { recalculados, omitidos };
   }
 
   private async validarSolape(tx: DbTx, empleadoId: number, entrada: Date, salida: Date | null, excluirId?: number) {
@@ -383,6 +400,7 @@ export class ServicioMarcaciones {
     return this.db.transaction(async (tx) => {
       const [e] = await tx.select().from(empleados).where(eq(empleados.id, datos.empleadoId));
       if (!e) throw noEncontrado("Empleado");
+      await exigirPeriodoAbierto(tx, fechaLocal(datos.entrada));
       await tx.execute(sql`select pg_advisory_xact_lock(${e.id})`);
       await this.validarSolape(tx, e.id, datos.entrada, datos.salida);
       const [m] = await tx
@@ -412,6 +430,7 @@ export class ServicioMarcaciones {
       const [m] = await tx.select().from(marcaciones).where(eq(marcaciones.id, id));
       if (!m) throw noEncontrado("Marcación");
       if (m.estado === "ANULADA") throw conflicto("No se puede editar una marcación anulada.");
+      await exigirPeriodoAbierto(tx, fechaLocal(m.entrada), fechaLocal(cambios.entrada ?? m.entrada));
       await tx.execute(sql`select pg_advisory_xact_lock(${m.empleadoId})`);
 
       const entrada = cambios.entrada ?? m.entrada;
@@ -463,6 +482,7 @@ export class ServicioMarcaciones {
       const [m] = await tx.select().from(marcaciones).where(eq(marcaciones.id, id));
       if (!m) throw noEncontrado("Marcación");
       if (m.estado === "ANULADA") throw conflicto("La marcación ya está anulada.");
+      await exigirPeriodoAbierto(tx, fechaLocal(m.entrada));
       const [actual] = await tx.update(marcaciones).set({ estado: "ANULADA" }).where(eq(marcaciones.id, id)).returning();
       await this.recalcularDia(tx, m.empleadoId, fechaLocal(m.entrada));
       await this.auditar(tx, usuarioId, id, "ANULAR", motivo, instantanea(m), instantanea(actual!));

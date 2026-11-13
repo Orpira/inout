@@ -1,23 +1,36 @@
 import { ETIQUETAS, sumarDias, type Categoria } from "@inout/core";
 import { useQuery } from "@tanstack/react-query";
-import { Download } from "lucide-react";
+import { Download, Lock } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
+import { AvisoCierre, AvisoPendientes, DialogoCerrarPeriodo, DialogoReabrirPeriodo, HistorialPeriodos } from "../componentes/PeriodosLiquidados";
 import { SelectorEmpleado } from "../componentes/SelectorEmpleado";
 import { Cargando, Encabezado, MensajeError, Vacio } from "../componentes/ui";
 import { api, descargar } from "../lib/api";
 import { fechaISOCorta, horasDecimales, hoyLocal, nombreCompleto, pesos } from "../lib/formato";
-import type { Empleado, ReporteLiquidacion } from "../lib/tipos";
+import { useSesion } from "../lib/sesion";
+import type { Empleado, PeriodoLiquidado, ReporteLiquidacion } from "../lib/tipos";
 
 const RECARGOS: Categoria[] = ["ORD_NOCTURNA", "ORD_DIURNA_DF", "ORD_NOCTURNA_DF"];
 const EXTRAS: Categoria[] = ["EXT_DIURNA", "EXT_NOCTURNA", "EXT_DIURNA_DF", "EXT_NOCTURNA_DF"];
 
-function periodos() {
+interface Periodo {
+  id: string;
+  texto: string;
+  desde: string;
+  hasta: string;
+}
+
+function periodosRapidos(ultimoLiquidado?: string): Periodo[] {
   const hoy = hoyLocal();
   const mes = hoy.slice(0, 7);
   const finMes = sumarDias(`${sumarDias(`${mes}-28`, 4).slice(0, 7)}-01`, -1);
   const inicioAnterior = `${sumarDias(`${mes}-01`, -1).slice(0, 7)}-01`;
+  const ayer = sumarDias(hoy, -1);
+  const sinLiquidar = ultimoLiquidado ? sumarDias(ultimoLiquidado, 1) : null;
   return [
+    // Desde el día siguiente al último cierre hasta ayer: lo que toca liquidar ahora.
+    ...(sinLiquidar && sinLiquidar <= ayer ? [{ id: "pend", texto: "Sin liquidar", desde: sinLiquidar, hasta: ayer }] : []),
     { id: "q1", texto: "1.ª quincena", desde: `${mes}-01`, hasta: `${mes}-15` },
     { id: "q2", texto: "2.ª quincena", desde: `${mes}-16`, hasta: finMes },
     { id: "mes", texto: "Este mes", desde: `${mes}-01`, hasta: finMes },
@@ -26,8 +39,16 @@ function periodos() {
 }
 
 export default function Liquidacion() {
-  const ps = periodos();
-  const [rango, setRango] = useState({ desde: ps[2]!.desde, hasta: ps[2]!.hasta });
+  const { usuario } = useSesion();
+  const esAdmin = usuario?.rol === "ADMIN";
+  const cierres = useQuery({ queryKey: ["periodos"], queryFn: () => api<{ datos: PeriodoLiquidado[] }>("/periodos") });
+  const historial = cierres.data?.datos ?? [];
+  const ultimoLiquidado = historial.filter((p) => p.vigente).reduce<string | undefined>((m, p) => (!m || p.hasta > m ? p.hasta : m), undefined);
+  const ps = periodosRapidos(ultimoLiquidado);
+  const mes = ps.find((p) => p.id === "mes")!;
+  const [rango, setRango] = useState({ desde: mes.desde, hasta: mes.hasta });
+  const [cerrando, setCerrando] = useState<ReporteLiquidacion | null>(null);
+  const [reabriendo, setReabriendo] = useState<PeriodoLiquidado | null>(null);
   const [empleadoId, setEmpleadoId] = useState<number | null>(null);
   // Incluye inactivos: alguien dado de baja puede tener turnos por liquidar en el periodo.
   const emps = useQuery({ queryKey: ["empleados", "todos"], queryFn: () => api<{ datos: Empleado[] }>("/empleados?estado=todos") });
@@ -37,6 +58,17 @@ export default function Liquidacion() {
     queryKey: ["liquidacion", rango, empleadoId],
     queryFn: () => api<ReporteLiquidacion>(consulta),
   });
+  const estado = q.data?.cierre.estado;
+  // Por qué no se puede cerrar todavía (null = se puede).
+  const impedimento = !q.data
+    ? "Cargando…"
+    : empleadoId
+      ? "Quita el filtro de empleado: el periodo se cierra para todos."
+      : rango.hasta >= hoyLocal()
+        ? "El periodo aún no termina: la fecha final debe ser anterior a hoy."
+        : q.data.pendientes.total
+          ? "Hay registros por resolver en el periodo."
+          : null;
 
   return (
     <div>
@@ -44,13 +76,21 @@ export default function Liquidacion() {
         titulo="Liquidación de recargos y horas extra"
         descripcion="Valores a pagar adicionales al salario, por empleado, para los turnos cerrados del periodo. Los turnos por revisar y las horas extra sin aprobar no se incluyen hasta que se resuelvan."
         acciones={
-          <button
-            className="btn btn-secundario"
-            title={empleado ? `Solo ${nombreCompleto(empleado)}` : "Todos los empleados del periodo"}
-            onClick={() => descargar(`${consulta}&formato=csv`)}
-          >
-            <Download size={16} /> Descargar para nómina (CSV)
-          </button>
+          <>
+            <button
+              className="btn btn-secundario"
+              disabled={estado === "MIXTO"}
+              title={estado === "MIXTO" ? "El rango mezcla días ya liquidados con días sin liquidar" : empleado ? `Solo ${nombreCompleto(empleado)}` : "Todos los empleados del periodo"}
+              onClick={() => descargar(`${consulta}&formato=csv`)}
+            >
+              <Download size={16} /> Descargar para nómina (CSV)
+            </button>
+            {esAdmin && estado === "ABIERTO" && (
+              <button className="btn btn-primario" disabled={!!impedimento} title={impedimento ?? "Dar el periodo por liquidado y dejarlo de solo consulta"} onClick={() => setCerrando(q.data ?? null)}>
+                <Lock size={16} /> Cerrar periodo
+              </button>
+            )}
+          </>
         }
       />
 
@@ -90,6 +130,18 @@ export default function Liquidacion() {
         <MensajeError error={q.error} />
       ) : (
         <>
+          <AvisoCierre
+            cierre={q.data.cierre}
+            periodos={historial}
+            hasta={rango.hasta}
+            esAdmin={esAdmin}
+            onVerSinLiquidar={(desde) => setRango({ ...rango, desde })}
+            onReabrir={setReabriendo}
+          />
+          <AvisoPendientes pendientes={q.data.pendientes} desde={rango.desde} hasta={rango.hasta} />
+          {esAdmin && estado === "ABIERTO" && impedimento && !q.data.pendientes.total && !empleadoId && q.data.datos.length > 0 && (
+            <p className="mb-4 text-[0.88rem] text-tinta-suave">Para cerrar este periodo: {impedimento.charAt(0).toLowerCase() + impedimento.slice(1)}</p>
+          )}
           <dl className="mb-6 grid grid-cols-2 gap-6 border-y border-linea py-5 md:grid-cols-4">
             <div>
               <dt className="text-[0.86rem] font-medium text-tinta-suave">Periodo</dt>
@@ -149,6 +201,17 @@ export default function Liquidacion() {
                         {f.minutosExtraPendientes > 0 && (
                           <p className="text-[0.82rem] font-medium text-extra-oscuro">{horasDecimales(f.minutosExtraPendientes)} h extra por aprobar</p>
                         )}
+                        {f.turnosPorRevisar + f.turnosEnCurso > 0 && (
+                          <p className="text-[0.82rem] font-medium text-alerta">
+                            {[
+                              f.turnosPorRevisar ? `${f.turnosPorRevisar} por revisar` : null,
+                              f.turnosEnCurso ? `${f.turnosEnCurso} sin cerrar` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" y ")}
+                            : no incluido
+                          </p>
+                        )}
                         {f.alertas.map((a) => (
                           <p key={a} className="text-[0.82rem] text-alerta">{a}</p>
                         ))}
@@ -185,6 +248,10 @@ export default function Liquidacion() {
           </dl>
         </>
       )}
+
+      <HistorialPeriodos periodos={historial} esAdmin={esAdmin} onVer={(p) => setRango({ desde: p.desde, hasta: p.hasta })} onReabrir={setReabriendo} />
+      <DialogoCerrarPeriodo reporte={cerrando} onCerrar={() => setCerrando(null)} />
+      <DialogoReabrirPeriodo periodo={reabriendo} onCerrar={() => setReabriendo(null)} />
     </div>
   );
 }

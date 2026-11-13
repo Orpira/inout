@@ -4,7 +4,7 @@ import { auditoria } from "../db/schema.js";
 
 export const motivoObligatorio = z.string().trim().min(5, "Explica el motivo (mínimo 5 caracteres)").max(500);
 
-export type EntidadAuditada = "marcacion" | "empleado" | "horario" | "festivo";
+export type EntidadAuditada = "marcacion" | "empleado" | "horario" | "festivo" | "periodo";
 
 /** Las fechas de festivos se auditan con un id numérico AAAAMMDD. */
 export const idFecha = (fecha: string) => Number(fecha.replace(/-/g, ""));

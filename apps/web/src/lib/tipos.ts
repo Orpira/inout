@@ -137,9 +137,44 @@ export interface FilaLiquidacion {
   minutosTotales: number;
   minutosExtra: number;
   minutosExtraPendientes: number;
+  /** Turnos del periodo sin resolver: no están incluidos en los valores. */
+  turnosPorRevisar: number;
+  turnosEnCurso: number;
   valorTotal: number;
   categorias: Partial<Record<Categoria, { minutos: number; valor: number }>>;
   alertas: string[];
+}
+
+export interface PendientesPeriodo {
+  porRevisar: number;
+  enTurno: number;
+  extrasPorAprobar: number;
+  offlineSinResolver: number;
+  total: number;
+}
+
+export interface ResumenPeriodo {
+  empleados: number;
+  turnos: number;
+  minutosTotales: number;
+  minutosExtra: number;
+  valorTotal: number;
+}
+
+/** Un cierre de liquidación. Si se reabrió, queda como historial (vigente = false). */
+export interface PeriodoLiquidado {
+  id: number;
+  desde: string;
+  hasta: string;
+  nota: string | null;
+  resumen: ResumenPeriodo;
+  detalle: { empleadoId: number; identificacion: string; nombre: string; turnos: number; minutosTotales: number; minutosExtra: number; valorTotal: number }[];
+  cerradoEn: string;
+  cerradoPorNombre: string | null;
+  reabiertoEn: string | null;
+  reabiertoPorNombre: string | null;
+  motivoReapertura: string | null;
+  vigente: boolean;
 }
 
 export interface ReporteLiquidacion {
@@ -154,5 +189,11 @@ export interface ReporteLiquidacion {
     minutosExtraPendientes: number;
     valorTotal: number;
     categorias: Record<Categoria, { minutos: number; valor: number }>;
+  };
+  pendientes: PendientesPeriodo;
+  cierre: {
+    /** LIQUIDADO: todos los días del rango están cerrados. MIXTO: solo una parte. */
+    estado: "ABIERTO" | "LIQUIDADO" | "MIXTO";
+    periodos: { id: number; desde: string; hasta: string; cerradoEn: string; nota: string | null }[];
   };
 }

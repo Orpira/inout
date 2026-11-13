@@ -70,6 +70,19 @@ El calendario se puede ajustar desde **Festivos y normas** (días cívicos, o si
 - Más de 12 h extra en una semana (lunes a domingo), en el reporte de liquidación.
 - Turnos de más de 16 h.
 
+## Cierre de periodos liquidados
+
+La liquidación es un reporte: mientras un periodo no se cierra, sus valores cambian si se corrige una marcación. Al **cerrar** un periodo (cualquier rango de fechas, no solo meses) sus días quedan de **solo consulta**.
+
+- **Quién**: solo administradores. Cualquier usuario puede consultar.
+- **Requisitos para cerrar**: el periodo ya terminó (fecha final anterior a hoy), no comparte días con otro cierre vigente y no tiene nada por resolver: turnos por revisar, turnos sin cerrar, horas extra por aprobar ni marcaciones sin conexión rechazadas. Así ningún turno se queda sin pagar.
+- **Qué bloquea**: crear, corregir, anular, aprobar extras y recalcular marcaciones cuya entrada cae en el periodo, también desde el kiosko sin conexión. El recálculo por cambio de salario o de festivos omite esos días.
+- **Rangos mezclados**: si el rango consultado incluye días liquidados y sin liquidar, se avisa y no se puede descargar el CSV ni cerrar, para no pagar dos veces.
+- **Reabrir**: un administrador puede reabrir un cierre indicando el motivo. El cierre anterior se conserva en el historial con su total, el detalle por empleado y el motivo; al volver a cerrar se registra una liquidación nueva y se muestra la diferencia.
+- Cierres y reaperturas quedan en la auditoría (`CERRAR_PERIODO`, `REABRIR_PERIODO`).
+
+El reporte y el CSV indican además los turnos del periodo que no están incluidos (columna «Turnos por revisar (no incluidos)»); los empleados que solo tienen turnos sin resolver aparecen con valores en cero.
+
 ## Supuestos a validar con nómina
 
 - Las horas trabajadas en un día no laborable del horario (sábado del administrativo, domingo) se liquidan como **extra** (con recargo dominical si es domingo o festivo), porque superan la jornada semanal ya distribuida. Si la empresa liquida el domingo ocasional como ordinario con recargo y descanso compensatorio, se puede reflejar marcando ese día como laborable en el horario.
