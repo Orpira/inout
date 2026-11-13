@@ -113,6 +113,8 @@ export const marcaciones = pgTable(
     estado: estadoMarcacionEnum("estado").notNull().default("ABIERTA"),
     origen: origenMarcacionEnum("origen").notNull().default("KIOSKO"),
     observacion: text("observacion"),
+    /** La salida la puso el sistema con la hora del horario porque el empleado no la marcó. */
+    salidaAutomatica: boolean("salida_automatica").notNull().default(false),
     minutosTotales: integer("minutos_totales"),
     /** Extras liquidadas (reconocidas). */
     minutosExtra: integer("minutos_extra"),

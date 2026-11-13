@@ -59,6 +59,8 @@ export interface Marcacion {
   estado: EstadoMarcacion;
   origen: "KIOSKO" | "KIOSKO_OFFLINE" | "MANUAL" | "MIGRACION";
   observacion: string | null;
+  /** La salida la puso el sistema con la hora del horario porque el empleado no la marcó. */
+  salidaAutomatica?: boolean;
   minutosTotales: number | null;
   minutosExtra: number | null;
   minutosExtraCalculados: number | null;

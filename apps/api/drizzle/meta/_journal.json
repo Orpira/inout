@@ -29,6 +29,13 @@
       "when": 1794597059338,
       "tag": "0003_periodos_liquidados",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794600594506,
+      "tag": "0004_salida_automatica",
+      "breakpoints": true
     }
   ]
 }

@@ -20,10 +20,13 @@ export interface EmpleadoDirectorio {
   apellido: string;
   cargo: string | null;
   abiertaDesde: string | null;
+  /** Hora con la que el sistema cerraría el turno abierto (null = desconocida o sin referencia). */
+  salidaProgramada?: string | null;
 }
 
 interface Directorio {
   generadoEn: string | null;
+  maxHorasTurno?: number;
   deshabilitado?: boolean;
   empleados: Record<string, EmpleadoDirectorio>;
 }
@@ -140,10 +143,10 @@ export const directorioDisponible = () => {
 
 export async function actualizarDirectorio(): Promise<void> {
   try {
-    const r = await api<{ generadoEn: string; empleados: EmpleadoDirectorio[] }>("/kiosko/directorio", { timeoutMs: 15000 });
+    const r = await api<{ generadoEn: string; maxHorasTurno?: number; empleados: EmpleadoDirectorio[] }>("/kiosko/directorio", { timeoutMs: 15000 });
     const pendientes = cola();
     const empleados = Object.fromEntries(r.empleados.map((e) => [e.identificacion, e]));
-    escribir(K_DIR, { generadoEn: r.generadoEn, empleados });
+    escribir(K_DIR, { generadoEn: r.generadoEn, maxHorasTurno: r.maxHorasTurno, empleados });
     // Reaplica sobre el directorio las marcas que aún no llegaron al servidor.
     for (const m of pendientes) alternarEstadoLocal(m.codigo, new Date(m.capturadoEn));
   } catch (e) {
@@ -157,12 +160,17 @@ export function buscarEnDirectorio(codigo: string): EmpleadoDirectorio | null {
   return directorio().empleados[codigo] ?? null;
 }
 
+/** Horas sin salida tras las cuales el sistema da el turno por cerrado (lo informa el servidor; 16 por defecto). */
+export const maxHorasTurno = () => directorio().maxHorasTurno ?? 16;
+
 function alternarEstadoLocal(codigo: string, momento: Date): "ENTRADA" | "SALIDA" | null {
   const d = directorio();
   const e = d.empleados[codigo];
   if (!e) return null;
-  const tipo = e.abiertaDesde ? "SALIDA" : "ENTRADA";
+  const vencida = !!e.abiertaDesde && momento.getTime() - new Date(e.abiertaDesde).getTime() > (d.maxHorasTurno ?? 16) * 3_600_000;
+  const tipo = e.abiertaDesde && !vencida ? "SALIDA" : "ENTRADA";
   e.abiertaDesde = tipo === "ENTRADA" ? momento.toISOString() : null;
+  e.salidaProgramada = null;
   escribir(K_DIR, d);
   return tipo;
 }
@@ -173,5 +181,6 @@ export function registrarEstadoLocal(codigo: string, tipo: "ENTRADA" | "SALIDA",
   const e = d.empleados[codigo];
   if (!e) return;
   e.abiertaDesde = tipo === "ENTRADA" ? momento : null;
+  e.salidaProgramada = null;
   escribir(K_DIR, d);
 }

@@ -1,6 +1,7 @@
+import { fechaLocal, horarioLegalPorDefecto, salidaProgramada } from "@inout/core";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { empleados, marcaciones as marcacionesT } from "../db/schema.js";
+import { empleados, horarios, marcaciones as marcacionesT } from "../db/schema.js";
 import { ErrorHttp } from "../errores.js";
 import { zapp, type Rutas } from "../contexto.js";
 
@@ -63,11 +64,22 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
         apellido: empleados.apellido,
         cargo: empleados.cargo,
         abiertaDesde: marcacionesT.entrada,
+        horario: horarios,
       })
       .from(empleados)
       .leftJoin(marcacionesT, and(eq(marcacionesT.empleadoId, empleados.id), eq(marcacionesT.estado, "ABIERTA")))
+      .leftJoin(horarios, eq(horarios.id, empleados.horarioId))
       .where(eq(empleados.activo, true));
-    return { generadoEn: new Date().toISOString(), empleados: filas };
+    return {
+      generadoEn: new Date().toISOString(),
+      // Con más horas sin salida, el kiosko da el turno por cerrado y la marcación es una entrada nueva.
+      maxHorasTurno: env.MAX_HORAS_TURNO,
+      empleados: filas.map(({ horario, ...e }) => ({
+        ...e,
+        // Con esto el kiosko puede decir, sin conexión, con qué hora se cerrará un turno olvidado.
+        salidaProgramada: e.abiertaDesde ? salidaProgramada(horario ?? horarioLegalPorDefecto(fechaLocal(e.abiertaDesde)), e.abiertaDesde) : null,
+      })),
+    };
   });
 
   /** Recibe en lote las marcaciones capturadas sin conexión. */

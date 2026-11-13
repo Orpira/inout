@@ -10,6 +10,7 @@
  * con jornadas diarias de 4 a 9 horas sin recargo por trabajo suplementario, y un día de descanso.
  * Lo que excede la jornada ordinaria del día (o cualquier hora en un día no laborable) es hora extra.
  */
+import { desdeLocal, diaSemana, fechaLocal } from "./fechas.js";
 import { jornadaSemanal } from "./parametros.js";
 
 export type Descanso =
@@ -117,4 +118,36 @@ export function horarioLegalPorDefecto(fecha: string): Horario {
     toleranciaMinutos: 0,
     requiereAprobacion: false,
   };
+}
+
+/**
+ * Hora con la que se cierra un turno al que le falta la salida, según el horario del empleado:
+ * - FIJO: la hora de salida del horario ese día.
+ * - TURNOS (o jornada legal por defecto): entrada + horas ordinarias del día + descanso no remunerado.
+ *
+ * Devuelve null si el horario no da una referencia (día no laborable, o entrada posterior
+ * a la hora de salida del horario): ese turno debe revisarlo un supervisor.
+ */
+export function salidaProgramada(h: Horario, entrada: Date): Date | null {
+  const fecha = fechaLocal(entrada);
+  const dia = h.dias[diaSemana(fecha)];
+  if (!dia?.laborable || dia.minutos <= 0) return null;
+
+  if (h.tipo === "FIJO" && dia.inicio && dia.fin) {
+    let fin = desdeLocal(fecha, dia.fin);
+    if (aMinutos(dia.fin) <= aMinutos(dia.inicio)) fin = new Date(fin.getTime() + 24 * 3_600_000); // cruza la medianoche
+    return fin.getTime() > entrada.getTime() ? fin : null;
+  }
+
+  let minutos = dia.minutos;
+  if (h.descanso?.tipo === "DURACION" && dia.minutos > h.descanso.despuesDe) {
+    minutos += h.descanso.minutos;
+  } else if (h.descanso?.tipo === "VENTANA") {
+    // La franja de descanso que caiga dentro del turno alarga la presencia.
+    const ini = desdeLocal(fecha, h.descanso.inicio).getTime();
+    const fin = desdeLocal(fecha, h.descanso.fin).getTime();
+    const finTurno = entrada.getTime() + minutos * 60_000;
+    if (ini >= entrada.getTime() && ini < finTurno) minutos += Math.round((fin - ini) / 60_000);
+  }
+  return new Date(entrada.getTime() + minutos * 60_000);
 }

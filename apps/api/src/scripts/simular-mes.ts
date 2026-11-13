@@ -14,7 +14,7 @@
  *   - Festivos de Colombia que caen en el periodo (trabajados y descansados).
  *   - Alerta de más de 2 h extra en el día y de más de 12 h extra en la semana.
  *   - Tolerancia, extras pendientes, aprobadas, aprobadas en parte, rechazadas y en lote.
- *   - Turnos sin salida que pasan a revisión (uno corregido por el supervisor y otro pendiente).
+ *   - Turnos sin salida que el sistema cierra con la hora del horario (salida automática).
  *   - Registro manual (kiosko caído), corrección de hora de entrada, anulación por error.
  *   - Corrección de horas que anula una aprobación previa.
  *   - Marcaciones sin conexión: reloj de tablet desfasado, duplicado descartado y código inválido.
@@ -282,7 +282,7 @@ async function simular() {
 
     // Carlos: sin horario asignado (jornada legal L-S de 7 h, extras automáticas).
     // Sale a las 05:00: la primera hora es nocturna.
-    // Hace pocos días olvidó marcar la salida: el turno queda "por revisar" en el panel.
+    // Hace pocos días olvidó marcar la salida: el sistema lo cierra con la hora de su jornada (salida automática).
     if (ds !== 0) {
       const extra = azar() < 0.35 ? entre(30, 150) : entre(0, 5);
       const olvido = !caso.olvidoCarlos && fecha >= sumarDias(hoy, -5) && fecha < sumarDias(hoy, -1);

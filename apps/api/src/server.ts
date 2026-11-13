@@ -7,11 +7,11 @@ if (process.argv.includes("--migrar")) await migrar(env.DATABASE_URL);
 
 const { app, ctx } = await construirApp(env);
 
-// Tarea periódica: envía a revisión los turnos sin salida que superan MAX_HORAS_TURNO.
+// Tarea periódica: cierra con la hora del horario los turnos sin salida que superan MAX_HORAS_TURNO.
 const revisarVencidas = async () => {
   try {
-    const n = await ctx.marcaciones.enviarVencidasARevision();
-    if (n) app.log.info({ n }, "Marcaciones sin salida enviadas a revisión");
+    const r = await ctx.marcaciones.cerrarVencidas();
+    if (r.cerradas || r.aRevision) app.log.info(r, "Turnos sin salida cerrados automáticamente o enviados a revisión");
   } catch (e) {
     app.log.error(e, "Error revisando marcaciones vencidas");
   }

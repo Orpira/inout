@@ -1,4 +1,4 @@
-import { desdeLocal, diaSemana, fechaLocal, horarioLegalPorDefecto, liquidar, minutosOrdinariosHorario, sumarDias, type Horario } from "@inout/core";
+import { aHoraLocal, desdeLocal, diaSemana, fechaLocal, horarioLegalPorDefecto, liquidar, minutosOrdinariosHorario, salidaProgramada, sumarDias, type Horario } from "@inout/core";
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { Db, DbTx } from "../db/client.js";
 import {
@@ -47,6 +47,28 @@ export class ServicioMarcaciones {
     private readonly env: Pick<Env, "MAX_HORAS_TURNO" | "ANTIREBOTE_SEGUNDOS" | "MAX_HORAS_OFFLINE">,
   ) {}
 
+  /** Horario asignado al empleado o, si no tiene, la jornada legal de lunes a sábado. */
+  private async horarioDe(tx: DbTx, empleado: Pick<Empleado, "horarioId">, fecha: string): Promise<Horario> {
+    if (empleado.horarioId) {
+      const [h] = await tx.select().from(horarios).where(eq(horarios.id, empleado.horarioId));
+      if (h) return h;
+    }
+    return horarioLegalPorDefecto(fecha);
+  }
+
+  /**
+   * Situación de un turno abierto frente a una nueva marcación en `momento`:
+   * - `vencida`: lleva más de MAX_HORAS_TURNO sin salida. El sistema lo cierra solo y la marcación es una entrada nueva.
+   * - `salidaProgramada`: hora con la que se cierra (null = sin referencia en el horario; va a revisión).
+   */
+  async situacionAbierta(tx: DbTx, empleado: Pick<Empleado, "horarioId">, abierta: Pick<Marcacion, "entrada">, momento = new Date()) {
+    return {
+      entrada: abierta.entrada,
+      salidaProgramada: salidaProgramada(await this.horarioDe(tx, empleado, fechaLocal(abierta.entrada)), abierta.entrada),
+      vencida: momento.getTime() - abierta.entrada.getTime() > this.env.MAX_HORAS_TURNO * 3_600_000,
+    };
+  }
+
   async buscarEmpleadoPorCodigo(codigo: string) {
     const [e] = await this.db
       .select()
@@ -57,11 +79,19 @@ export class ServicioMarcaciones {
       .select({ entrada: marcaciones.entrada })
       .from(marcaciones)
       .where(and(eq(marcaciones.empleadoId, e.id), eq(marcaciones.estado, "ABIERTA")));
-    return { ...resumenEmpleado(e), proximaMarca: (abierta ? "SALIDA" : "ENTRADA") as TipoMarca, abiertaDesde: abierta?.entrada ?? null };
+    const situacion = abierta ? await this.situacionAbierta(this.db, e, abierta) : null;
+    return {
+      ...resumenEmpleado(e),
+      proximaMarca: (situacion && !situacion.vencida ? "SALIDA" : "ENTRADA") as TipoMarca,
+      abiertaDesde: abierta?.entrada ?? null,
+      abierta: situacion,
+    };
   }
 
   /**
    * Marcación desde el kiosko: abre o cierra el turno según el estado actual.
+   * Si el turno abierto lleva más de MAX_HORAS_TURNO sin salida, se cierra con la hora del horario
+   * y esta marcación es una entrada nueva.
    * `momento` permite sincronizar marcaciones capturadas sin conexión.
    */
   async marcar(codigo: string, opciones: { momento?: Date; offline?: boolean } = {}): Promise<ResultadoMarca> {
@@ -99,24 +129,12 @@ export class ServicioMarcaciones {
         if (transcurridoMs < antirreboteMs) {
           throw conflicto("Ya registraste tu entrada hace un momento.", "MARCA_DUPLICADA");
         }
-        if (transcurridoMs > this.env.MAX_HORAS_TURNO * 3_600_000) {
-          // Turno sin salida: se envía a revisión y se abre uno nuevo.
-          const [revision] = await tx
-            .update(marcaciones)
-            .set({
-              estado: "REVISION",
-              observacion: añadir(abierta.observacion, `Sin salida registrada en ${this.env.MAX_HORAS_TURNO} h.`),
-            })
-            .where(eq(marcaciones.id, abierta.id))
-            .returning();
-          await this.auditar(tx, null, revision!.id, "ENVIAR_REVISION", "Turno sin salida", instantanea(abierta), instantanea(revision!));
+        const sit = await this.situacionAbierta(tx, empleado, abierta, momento);
+        if (sit.vencida) {
+          // Turno olvidado: se cierra con la hora del horario (o va a revisión si no hay referencia) y se abre uno nuevo.
+          const aviso = await this.cerrarOlvidada(tx, abierta, sit.salidaProgramada, `Sin salida registrada en ${this.env.MAX_HORAS_TURNO} h`);
           const nueva = await this.crearEntrada(tx, empleado.id, momento, origen);
-          return {
-            tipo: "ENTRADA",
-            marcacion: nueva,
-            empleado: resumenEmpleado(empleado),
-            aviso: "Tenías un turno anterior sin salida; quedó pendiente de revisión por tu supervisor.",
-          };
+          return { tipo: "ENTRADA", marcacion: nueva, empleado: resumenEmpleado(empleado), aviso };
         }
         const cerrada = await this.cerrar(tx, abierta, momento);
         return { tipo: "SALIDA", marcacion: cerrada, empleado: resumenEmpleado(empleado) };
@@ -128,15 +146,17 @@ export class ServicioMarcaciones {
         .where(and(eq(marcaciones.empleadoId, empleado.id), ne(marcaciones.estado, "ANULADA")))
         .orderBy(desc(marcaciones.entrada))
         .limit(1);
-      // Salida guardada sin conexión que llega después de que el turno pasara a revisión
-      // por falta de salida: cierra ese turno en lugar de abrir uno nuevo.
+      // Salida guardada sin conexión que llega después de que el sistema diera el turno por olvidado
+      // (cerrado con la hora del horario, o en revisión): la salida real sustituye a la automática.
+      const olvidada = ultima && ((ultima.estado === "REVISION" && !ultima.salida) || (ultima.estado === "CERRADA" && ultima.salidaAutomatica));
       if (
         opciones.offline &&
-        ultima?.estado === "REVISION" &&
-        !ultima.salida &&
+        ultima &&
+        olvidada &&
         momento.getTime() > ultima.entrada.getTime() &&
         momento.getTime() - ultima.entrada.getTime() <= this.env.MAX_HORAS_TURNO * 3_600_000
       ) {
+        await tx.update(marcaciones).set({ salidaAutomatica: false }).where(eq(marcaciones.id, ultima.id));
         const cerrada = await this.cerrar(tx, ultima, momento);
         await this.auditar(tx, null, ultima.id, "CERRAR_SIN_CONEXION", "Salida recibida del kiosko al recuperar la conexión", instantanea(ultima), instantanea(cerrada));
         return { tipo: "SALIDA", marcacion: cerrada, empleado: resumenEmpleado(empleado) };
@@ -150,6 +170,37 @@ export class ServicioMarcaciones {
       const nueva = await this.crearEntrada(tx, empleado.id, momento, origen);
       return { tipo: "ENTRADA", marcacion: nueva, empleado: resumenEmpleado(empleado) };
     });
+  }
+
+  /**
+   * Cierra un turno al que le falta la salida con la hora de su horario y lo deja marcado como
+   * "salida automática". Si el horario no da una hora de referencia, lo envía a revisión.
+   * Devuelve el mensaje para el empleado.
+   */
+  private async cerrarOlvidada(tx: DbTx, m: Marcacion, salida: Date | null, causa: string): Promise<string> {
+    await exigirPeriodoAbierto(tx, fechaLocal(m.entrada));
+    if (!salida) {
+      const [revision] = await tx
+        .update(marcaciones)
+        .set({ estado: "REVISION", observacion: añadir(m.observacion, `${causa}. Sin hora de salida en el horario para ese día.`) })
+        .where(eq(marcaciones.id, m.id))
+        .returning();
+      await this.auditar(tx, null, m.id, "ENVIAR_REVISION", causa, instantanea(m), instantanea(revision!));
+      return "Tenías un turno anterior sin salida; quedó pendiente de revisión por tu supervisor.";
+    }
+    await tx
+      .update(marcaciones)
+      .set({
+        salida,
+        estado: "CERRADA",
+        salidaAutomatica: true,
+        observacion: añadir(m.observacion, `Salida automática a las ${horaTexto(salida)} (hora del horario). ${causa}.`),
+      })
+      .where(eq(marcaciones.id, m.id));
+    await this.recalcularDia(tx, m.empleadoId, fechaLocal(m.entrada));
+    const [cerrada] = await tx.select().from(marcaciones).where(eq(marcaciones.id, m.id));
+    await this.auditar(tx, null, m.id, "CIERRE_AUTOMATICO", `${causa}: se cerró con la hora del horario`, instantanea(m), instantanea(cerrada!));
+    return `Tu turno anterior no tenía salida: se cerró con la hora de tu horario (${horaTexto(salida)}). Si no es correcta, avisa a tu supervisor.`;
   }
 
   private async crearEntrada(tx: DbTx, empleadoId: number, entrada: Date, origen: Marcacion["origen"]) {
@@ -463,7 +514,7 @@ export class ServicioMarcaciones {
           salida,
           estado,
           // Si cambian las horas, una aprobación previa de extras deja de ser válida.
-          ...(cambianHoras ? { estadoExtras: null, minutosExtraAprobados: null, extrasRevisadasPor: null, extrasRevisadasEn: null } : {}),
+          ...(cambianHoras ? { estadoExtras: null, minutosExtraAprobados: null, extrasRevisadasPor: null, extrasRevisadasEn: null, salidaAutomatica: false } : {}),
           observacion,
         })
         .where(eq(marcaciones.id, id))
@@ -490,21 +541,30 @@ export class ServicioMarcaciones {
     });
   }
 
-  /** Envía a revisión las marcaciones abiertas que superan el máximo de horas de turno. */
-  async enviarVencidasARevision(): Promise<number> {
+  /**
+   * Turnos abiertos que superan MAX_HORAS_TURNO sin salida: se cierran con la hora de su horario,
+   * o pasan a revisión si el horario no da una referencia.
+   */
+  async cerrarVencidas(): Promise<{ cerradas: number; aRevision: number }> {
     const limite = new Date(Date.now() - this.env.MAX_HORAS_TURNO * 3_600_000);
     const vencidas = await this.db
-      .update(marcaciones)
-      .set({
-        estado: "REVISION",
-        observacion: sql`concat_ws(E'\n', ${marcaciones.observacion}, ${`Sin salida registrada en ${this.env.MAX_HORAS_TURNO} h.`}::text)`,
-      })
-      .where(and(eq(marcaciones.estado, "ABIERTA"), lt(marcaciones.entrada, limite)))
-      .returning({ id: marcaciones.id });
+      .select({ id: marcaciones.id })
+      .from(marcaciones)
+      .where(and(eq(marcaciones.estado, "ABIERTA"), lt(marcaciones.entrada, limite)));
+    const r = { cerradas: 0, aRevision: 0 };
     for (const v of vencidas) {
-      await this.auditar(this.db, null, v.id, "ENVIAR_REVISION", "Cierre automático por turno vencido", null, null);
+      await this.db.transaction(async (tx) => {
+        const [m] = await tx.select().from(marcaciones).where(and(eq(marcaciones.id, v.id), eq(marcaciones.estado, "ABIERTA")));
+        if (!m) return; // otra petición la cerró entretanto
+        await tx.execute(sql`select pg_advisory_xact_lock(${m.empleadoId})`);
+        const [e] = await tx.select().from(empleados).where(eq(empleados.id, m.empleadoId));
+        const programada = salidaProgramada(await this.horarioDe(tx, e!, fechaLocal(m.entrada)), m.entrada);
+        await this.cerrarOlvidada(tx, m, programada, `Sin salida registrada en ${this.env.MAX_HORAS_TURNO} h`);
+        if (programada) r.cerradas++;
+        else r.aRevision++;
+      });
     }
-    return vencidas.length;
+    return r;
   }
 
   private async auditar(
@@ -518,6 +578,12 @@ export class ServicioMarcaciones {
   ) {
     await tx.insert(auditoria).values({ usuarioId, entidad: "marcacion", entidadId, accion, motivo, antes, despues });
   }
+}
+
+/** "HH:mm" en hora local. */
+function horaTexto(d: Date) {
+  const l = aHoraLocal(d);
+  return `${String(l.hora).padStart(2, "0")}:${String(l.minuto).padStart(2, "0")}`;
 }
 
 function añadir(texto: string | null, linea: string) {

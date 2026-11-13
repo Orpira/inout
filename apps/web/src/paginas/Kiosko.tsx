@@ -3,13 +3,14 @@ import { Camera, Check, CloudUpload, Delete, LogIn, LogOut, ScanLine, WifiOff, X
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Marca } from "../componentes/Marco";
 import { api, ErrorApi } from "../lib/api";
-import { duracion, fechaLarga, hora } from "../lib/formato";
+import { duracion, fechaCorta, fechaLarga, hora } from "../lib/formato";
 import {
   actualizarDirectorio,
   buscarEnDirectorio,
   cola,
   directorioDisponible,
   encolar,
+  maxHorasTurno,
   registrarEstadoLocal,
   sincronizar,
 } from "../lib/kioskoOffline";
@@ -22,6 +23,14 @@ interface EmpleadoKiosko {
   /** null = sin conexión y sin directorio: no se sabe si toca entrada o salida. */
   proximaMarca: "ENTRADA" | "SALIDA" | null;
   abiertaDesde: string | null;
+  /** Entrada sin salida del empleado, si la tiene. */
+  abierta?: {
+    entrada: string;
+    /** Hora con la que el sistema cierra ese turno si quedó olvidado (null = sin referencia: va a revisión). */
+    salidaProgramada: string | null;
+    /** Lleva más horas abierta de las de un turno: se cierra sola y esta marcación es una entrada nueva. */
+    vencida: boolean;
+  } | null;
 }
 interface RespuestaMarca {
   tipo: "ENTRADA" | "SALIDA";
@@ -148,11 +157,14 @@ export default function Kiosko() {
       setPaso({ t: "codigo" });
       return;
     }
+    // Sin servidor, la situación del turno abierto se deduce de lo guardado en la tablet.
+    const vencida = !!e?.abiertaDesde && Date.now() - new Date(e.abiertaDesde).getTime() > maxHorasTurno() * 3_600_000;
+    const abierta = e?.abiertaDesde ? { entrada: e.abiertaDesde, salidaProgramada: e.salidaProgramada ?? null, vencida } : null;
     setPaso({
       t: "confirmar",
       offline: true,
       empleado: e
-        ? { ...e, proximaMarca: e.abiertaDesde ? "SALIDA" : "ENTRADA" }
+        ? { ...e, abierta, proximaMarca: abierta && !abierta.vencida ? "SALIDA" : "ENTRADA" }
         : { nombre: "Código", apellido: c, identificacion: c, cargo: null, proximaMarca: null, abiertaDesde: null },
     });
   };
@@ -340,34 +352,13 @@ export default function Kiosko() {
                     </p>
                   </>
                 )}
-                {paso.empleado.abiertaDesde && (
-                  <p className="mt-4 rounded-md bg-petroleo-claro px-3 py-2 text-petroleo-oscuro">
-                    Entraste a las <strong>{hora(paso.empleado.abiertaDesde)}</strong>. Llevas{" "}
-                    {duracion(Math.max(0, Math.floor((ahora.getTime() - new Date(paso.empleado.abiertaDesde).getTime()) / 60000)))}.
-                  </p>
-                )}
-                {error && (
-                  <p role="alert" className="mt-3 rounded-md bg-alerta-claro px-3 py-2 font-medium text-alerta">
-                    {error}
-                  </p>
-                )}
-                <button
-                  autoFocus
-                  disabled={paso.t === "registrando"}
-                  onClick={() => registrar(paso.empleado, paso.offline)}
-                  className={`mt-6 flex h-24 w-full items-center justify-center gap-3 rounded-lg text-[1.6rem] font-bold text-white disabled:opacity-60 ${
-                    paso.empleado.proximaMarca === "SALIDA" ? "bg-noche" : "bg-petroleo"
-                  }`}
-                >
-                  {paso.empleado.proximaMarca === "SALIDA" ? <LogOut size={30} /> : <LogIn size={30} />}
-                  {paso.t === "registrando"
-                    ? "Registrando…"
-                    : paso.empleado.proximaMarca === "ENTRADA"
-                      ? "Registrar entrada"
-                      : paso.empleado.proximaMarca === "SALIDA"
-                        ? "Registrar salida"
-                        : "Registrar marcación"}
-                </button>
+                <PasoMarcacion
+                  empleado={paso.empleado}
+                  ahora={ahora}
+                  ocupado={paso.t === "registrando"}
+                  error={error}
+                  onRegistrar={() => registrar(paso.empleado, paso.offline)}
+                />
                 <button className="btn btn-fantasma mt-3 h-12 w-full text-base" onClick={reiniciar}>
                   No soy yo
                 </button>
@@ -441,6 +432,68 @@ export default function Kiosko() {
         />
       )}
     </div>
+  );
+}
+
+const minutosDesde = (iso: string, ahora: Date) => Math.max(0, Math.floor((ahora.getTime() - new Date(iso).getTime()) / 60000));
+/** "a las 08:02" si fue hoy; "el Jue, 12 de nov a las 08:02" si fue otro día. */
+const cuando = (iso: string, ahora: Date) =>
+  aHoraLocal(new Date(iso)).fecha === aHoraLocal(ahora).fecha ? `a las ${hora(iso)}` : `el ${fechaCorta(iso)} a las ${hora(iso)}`;
+
+/**
+ * Botón para registrar. Con un turno normal muestra desde cuándo está abierto; si la entrada quedó
+ * olvidada (más horas de las de un turno), avisa de cómo se cierra y de que se registra una entrada nueva.
+ */
+function PasoMarcacion({
+  empleado,
+  ahora,
+  ocupado,
+  error,
+  onRegistrar,
+}: {
+  empleado: EmpleadoKiosko;
+  ahora: Date;
+  ocupado: boolean;
+  error: string | null;
+  onRegistrar: () => void;
+}) {
+  const abierta = empleado.abierta ?? (empleado.abiertaDesde ? { entrada: empleado.abiertaDesde, salidaProgramada: null, vencida: false } : null);
+  return (
+    <>
+      {abierta?.vencida && (
+        <div className="mt-4 rounded-md bg-extra-claro px-4 py-3 text-extra-oscuro">
+          <p className="font-bold">Tu turno anterior quedó sin salida</p>
+          <p className="mt-0.5">
+            Entraste <strong>{cuando(abierta.entrada, ahora)}</strong> y no marcaste la salida.{" "}
+            {abierta.salidaProgramada
+              ? `Se cierra con la salida de tu horario (${hora(abierta.salidaProgramada)}).`
+              : "Queda para que lo revise tu supervisor."}{" "}
+            Ahora vas a registrar una entrada nueva.
+          </p>
+        </div>
+      )}
+      {abierta && !abierta.vencida && (
+        <p className="mt-4 rounded-md bg-petroleo-claro px-3 py-2 text-petroleo-oscuro">
+          Entraste <strong>{cuando(abierta.entrada, ahora)}</strong>. Llevas {duracion(minutosDesde(abierta.entrada, ahora))}.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-3 rounded-md bg-alerta-claro px-3 py-2 font-medium text-alerta">
+          {error}
+        </p>
+      )}
+      <button
+        autoFocus
+        disabled={ocupado}
+        onClick={onRegistrar}
+        className={`mt-6 flex h-24 w-full items-center justify-center gap-3 rounded-lg text-[1.6rem] font-bold text-white disabled:opacity-60 ${
+          empleado.proximaMarca === "SALIDA" ? "bg-noche" : "bg-petroleo"
+        }`}
+      >
+        {empleado.proximaMarca === "SALIDA" ? <LogOut size={30} /> : <LogIn size={30} />}
+        {ocupado ? "Registrando…" : empleado.proximaMarca === "ENTRADA" ? "Registrar entrada" : empleado.proximaMarca === "SALIDA" ? "Registrar salida" : "Registrar marcación"}
+      </button>
+    </>
   );
 }
 

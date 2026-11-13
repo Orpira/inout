@@ -10,7 +10,7 @@ const esquema = z.object({
   CORS_ORIGIN: z.string().optional(),
   /** Si se define, el kiosko debe enviar este token en la cabecera x-kiosko-token. */
   KIOSKO_TOKEN: z.string().optional(),
-  /** Horas tras las cuales una marcación abierta pasa a revisión. */
+  /** Horas tras las cuales un turno sin salida se cierra solo con la hora de su horario (o pasa a revisión si no hay referencia). */
   MAX_HORAS_TURNO: z.coerce.number().min(4).max(48).default(16),
   /** Ventana anti-rebote entre marcaciones del mismo empleado (segundos). */
   ANTIREBOTE_SEGUNDOS: z.coerce.number().min(0).default(60),

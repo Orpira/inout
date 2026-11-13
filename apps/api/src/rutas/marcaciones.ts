@@ -18,6 +18,7 @@ export const columnasMarcacion = {
   estado: marcaciones.estado,
   origen: marcaciones.origen,
   observacion: marcaciones.observacion,
+  salidaAutomatica: marcaciones.salidaAutomatica,
   minutosTotales: marcaciones.minutosTotales,
   minutosExtra: marcaciones.minutosExtra,
   minutosExtraCalculados: marcaciones.minutosExtraCalculados,
@@ -52,6 +53,8 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
           estado: z.enum(["ABIERTA", "CERRADA", "REVISION", "ANULADA"]).optional(),
           q: z.string().optional(),
           soloExtras: z.coerce.boolean().optional(),
+          /** Solo turnos que el sistema cerró con la hora del horario. */
+          salidaAutomatica: z.coerce.boolean().optional(),
           estadoExtras: z.enum(["SIN_EXTRAS", "TOLERANCIA", "PENDIENTE", "APROBADAS", "RECHAZADAS", "AUTOMATICAS"]).optional(),
           pagina: z.coerce.number().int().min(1).default(1),
           porPagina: z.coerce.number().int().min(5).max(200).default(25),
@@ -66,6 +69,7 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
         f.empleadoId ? eq(marcaciones.empleadoId, f.empleadoId) : undefined,
         f.estado ? eq(marcaciones.estado, f.estado) : undefined,
         f.soloExtras ? sql`${marcaciones.minutosExtraCalculados} > 0` : undefined,
+        f.salidaAutomatica ? eq(marcaciones.salidaAutomatica, true) : undefined,
         f.estadoExtras ? eq(marcaciones.estadoExtras, f.estadoExtras) : undefined,
       ];
       if (f.q) {

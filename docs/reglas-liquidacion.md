@@ -70,6 +70,16 @@ El calendario se puede ajustar desde **Festivos y normas** (días cívicos, o si
 - Más de 12 h extra en una semana (lunes a domingo), en el reporte de liquidación.
 - Turnos de más de 16 h.
 
+## Entradas sin salida
+
+- **Turno normal** (menos de `MAX_HORAS_TURNO`, 16 h). La marcación alterna entrada y salida.
+- **Más de 16 h sin salida.** El turno se cierra solo con la **salida programada**, vuelva o no el empleado (tarea cada 10 minutos). No se pregunta nada al empleado.
+- **Si el empleado vuelve antes de que pase la tarea**, el kiosko le muestra la entrada que quedó sin salida y con qué hora se cierra, y su marcación se registra como una entrada nueva.
+- **Salida programada.** Horario fijo: la hora de salida del horario ese día. Turnos o sin horario: entrada + jornada ordinaria del día + descanso (7 h con la jornada legal).
+- **Sin referencia** (día no laborable del horario, o entrada posterior a la hora de salida): el turno pasa a **por revisar**, sin inventar la salida.
+- **Marca visible.** El turno cerrado así queda como «salida automática» (filtro en Marcaciones, observación y auditoría `CIERRE_AUTOMATICO`) y **se liquida** como cualquier turno cerrado. Si el supervisor corrige la hora, la marca desaparece.
+- **Sin conexión.** Una salida real guardada en la tablet que llega después sustituye a la automática.
+
 ## Cierre de periodos liquidados
 
 La liquidación es un reporte: mientras un periodo no se cierra, sus valores cambian si se corrige una marcación. Al **cerrar** un periodo (cualquier rango de fechas, no solo meses) sus días quedan de **solo consulta**.
