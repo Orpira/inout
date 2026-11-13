@@ -72,9 +72,9 @@ El calendario se puede ajustar desde **Festivos y normas** (días cívicos, o si
 
 ## Entradas sin salida
 
-- **En el kiosko.** Si el empleado tiene una entrada sin salida, al escribir su código se le muestra y se le pregunta qué registra: **Salida** (cierra el turno con la hora actual) o **Entrada nueva** (olvidó marcar la salida).
-- **Entrada nueva.** El turno olvidado se cierra con la **salida programada** y se abre el nuevo. Solo se permite cuando el turno ya terminó según el horario; antes, el kiosko solo deja marcar la salida.
-- **Más de 24 h sin salida** (`MAX_HORAS_TURNO`). El turno se cierra solo con la salida programada, vuelva o no el empleado (tarea cada 10 minutos). Si vuelve a marcar, registra directamente una entrada nueva.
+- **Turno normal** (menos de `MAX_HORAS_TURNO`, 16 h). La marcación alterna entrada y salida, sin preguntas.
+- **Más de 16 h sin salida.** Al escribir su código, el kiosko muestra la entrada pendiente y pregunta qué registra: **Salida** (cierra el turno con la hora actual) o **Entrada nueva** (olvidó marcar la salida). Con entrada nueva, el turno olvidado se cierra con la **salida programada** y se abre el nuevo.
+- **Más de 24 h sin salida** (`HORAS_CIERRE_AUTOMATICO`). El turno se cierra solo con la salida programada, vuelva o no el empleado (tarea cada 10 minutos). Si vuelve a marcar antes de que pase la tarea, registra directamente una entrada nueva.
 - **Salida programada.** Horario fijo: la hora de salida del horario ese día. Turnos o sin horario: entrada + jornada ordinaria del día + descanso (7 h con la jornada legal).
 - **Sin referencia** (día no laborable del horario, o entrada posterior a la hora de salida): el turno pasa a **por revisar**, sin inventar la salida.
 - **Marca visible.** El turno cerrado así queda como «salida automática» (filtro en Marcaciones, observación y auditoría `CIERRE_AUTOMATICO`) y **se liquida** como cualquier turno cerrado. Si el supervisor corrige la hora, la marca desaparece.

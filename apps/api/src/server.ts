@@ -7,7 +7,7 @@ if (process.argv.includes("--migrar")) await migrar(env.DATABASE_URL);
 
 const { app, ctx } = await construirApp(env);
 
-// Tarea periódica: cierra con la hora del horario los turnos sin salida que superan MAX_HORAS_TURNO.
+// Tarea periódica: cierra con la hora del horario los turnos sin salida que superan HORAS_CIERRE_AUTOMATICO.
 const revisarVencidas = async () => {
   try {
     const r = await ctx.marcaciones.cerrarVencidas();

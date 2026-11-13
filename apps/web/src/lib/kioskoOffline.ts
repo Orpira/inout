@@ -29,6 +29,7 @@ export interface EmpleadoDirectorio {
 interface Directorio {
   generadoEn: string | null;
   maxHorasTurno?: number;
+  horasCierreAutomatico?: number;
   deshabilitado?: boolean;
   empleados: Record<string, EmpleadoDirectorio>;
 }
@@ -145,10 +146,10 @@ export const directorioDisponible = () => {
 
 export async function actualizarDirectorio(): Promise<void> {
   try {
-    const r = await api<{ generadoEn: string; maxHorasTurno?: number; empleados: EmpleadoDirectorio[] }>("/kiosko/directorio", { timeoutMs: 15000 });
+    const r = await api<{ generadoEn: string; maxHorasTurno?: number; horasCierreAutomatico?: number; empleados: EmpleadoDirectorio[] }>("/kiosko/directorio", { timeoutMs: 15000 });
     const pendientes = cola();
     const empleados = Object.fromEntries(r.empleados.map((e) => [e.identificacion, e]));
-    escribir(K_DIR, { generadoEn: r.generadoEn, maxHorasTurno: r.maxHorasTurno, empleados });
+    escribir(K_DIR, { generadoEn: r.generadoEn, maxHorasTurno: r.maxHorasTurno, horasCierreAutomatico: r.horasCierreAutomatico, empleados });
     // Reaplica sobre el directorio las marcas que aún no llegaron al servidor.
     for (const m of pendientes) alternarEstadoLocal(m.codigo, new Date(m.capturadoEn), m.tipo);
   } catch (e) {
@@ -162,14 +163,17 @@ export function buscarEnDirectorio(codigo: string): EmpleadoDirectorio | null {
   return directorio().empleados[codigo] ?? null;
 }
 
-/** Horas tras las cuales un turno abierto se da por olvidado (lo informa el servidor; 24 por defecto). */
-export const maxHorasTurno = () => directorio().maxHorasTurno ?? 24;
+/** Límites que informa el servidor: desde cuántas horas se pregunta y desde cuántas el turno se da por cerrado. */
+export const limitesTurno = () => {
+  const d = directorio();
+  return { preguntar: d.maxHorasTurno ?? 16, cierre: d.horasCierreAutomatico ?? 24 };
+};
 
 function alternarEstadoLocal(codigo: string, momento: Date, elegido?: "ENTRADA" | "SALIDA"): "ENTRADA" | "SALIDA" | null {
   const d = directorio();
   const e = d.empleados[codigo];
   if (!e) return null;
-  const vencida = !!e.abiertaDesde && momento.getTime() - new Date(e.abiertaDesde).getTime() > (d.maxHorasTurno ?? 24) * 3_600_000;
+  const vencida = !!e.abiertaDesde && momento.getTime() - new Date(e.abiertaDesde).getTime() > (d.horasCierreAutomatico ?? 24) * 3_600_000;
   const tipo = elegido ?? (e.abiertaDesde && !vencida ? "SALIDA" : "ENTRADA");
   e.abiertaDesde = tipo === "ENTRADA" ? momento.toISOString() : null;
   e.salidaProgramada = null;

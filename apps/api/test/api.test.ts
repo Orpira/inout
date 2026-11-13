@@ -148,45 +148,47 @@ describe("kiosko", () => {
     })).json();
     const { id } = await crearEmpleado({ horarioId: horario.id });
     const marcar = (tipo?: string) => app.inject({ method: "POST", url: "/api/kiosko/marcar", payload: { codigo: "1001", ...(tipo ? { tipo } : {}) } });
-    const consultar = async () => (await app.inject({ method: "GET", url: "/api/kiosko/empleado/1001" })).json();
 
     // Sin turno abierto no hay nada que cerrar
     expect((await marcar("SALIDA")).json().codigo).toBe("SIN_ENTRADA_ABIERTA");
 
     // Entró el día D a las 08:00 (marcas con su hora, como llegan del kiosko sin conexión)
-    const D = diaAtras(false);
-    const a = (h: string) => desdeLocal(D, h);
+    const D = diaAtras(false, 4);
+    const a = (h: string, dias = 0) => desdeLocal(sumarDias(D, dias), h);
     const svc = app.ctx.marcaciones;
+    const cerradas = async () => (await api("GET", "/api/marcaciones?desde=2020-01-01&hasta=2100-01-01&estado=CERRADA")).json();
     expect((await svc.marcar("1001", { momento: a("08:00"), offline: true })).tipo).toBe("ENTRADA");
 
-    // A mediodía el turno sigue en curso según su horario: no puede abrir otra entrada
-    await expect(svc.marcar("1001", { momento: a("12:00"), offline: true, tipo: "ENTRADA" })).rejects.toMatchObject({ codigo: "TURNO_EN_CURSO" });
+    // Con menos de 16 h es un turno normal: no admite una entrada nueva, la marcación es la salida
+    await expect(svc.marcar("1001", { momento: a("20:00"), offline: true, tipo: "ENTRADA" })).rejects.toMatchObject({ codigo: "TURNO_EN_CURSO" });
+    expect((await svc.situacionAbierta(db, { horarioId: horario.id }, { entrada: a("08:00") }, a("20:00")))).toMatchObject({ preguntar: false, vencida: false, puedeEntrar: false });
 
-    // Por la noche vuelve sin haber marcado la salida y elige "Entrada": el turno olvidado se cierra a las 17:00
-    const nueva = await svc.marcar("1001", { momento: a("20:00"), offline: true, tipo: "ENTRADA" });
+    // A las 18 h sin salida el kiosko pregunta. Elige "Entrada": el turno olvidado se cierra a las 17:00
+    expect((await svc.situacionAbierta(db, { horarioId: horario.id }, { entrada: a("08:00") }, a("02:00", 1)))).toMatchObject({ preguntar: true, vencida: false, puedeEntrar: true });
+    const nueva = await svc.marcar("1001", { momento: a("02:00", 1), offline: true, tipo: "ENTRADA" });
     expect(nueva.tipo).toBe("ENTRADA");
     expect(nueva.aviso).toContain("17:00");
-    let lista = (await api("GET", "/api/marcaciones?desde=2020-01-01&hasta=2100-01-01&estado=CERRADA")).json();
+    let lista = await cerradas();
     expect(lista.total).toBe(1);
     expect(lista.datos[0]).toMatchObject({ salidaAutomatica: true, minutosTotales: 8 * 60, minutosExtra: 0 });
     expect(lista.datos[0].salida).toBe(a("17:00").toISOString());
 
-    // Con "Salida" (o sin elegir) el turno abierto se cierra con la hora de la marcación
-    expect((await svc.marcar("1001", { momento: a("23:00"), offline: true, tipo: "SALIDA" })).tipo).toBe("SALIDA");
-    lista = (await api("GET", "/api/marcaciones?desde=2020-01-01&hasta=2100-01-01&estado=CERRADA")).json();
+    // Turno normal: se cierra con la hora de la marcación
+    expect((await svc.marcar("1001", { momento: a("05:00", 1), offline: true })).tipo).toBe("SALIDA");
+    lista = await cerradas();
     expect(lista.datos.map((m: { salidaAutomatica: boolean }) => m.salidaAutomatica).sort()).toEqual([false, true]);
 
-    // Hoy: una entrada de hace más de 24 h (día D+1 a las 08:00) se cierra sola al volver a marcar, sin preguntar
-    await api("POST", "/api/marcaciones", { empleadoId: id, entrada: desdeLocal(diaAtras(false, 1), "08:00").toISOString(), motivo: "Entrada de prueba" });
-    const info = await consultar();
-    if (info.abierta.vencida) {
-      expect(info.proximaMarca).toBe("ENTRADA");
-      const r = (await marcar()).json();
-      expect(r.tipo).toBe("ENTRADA");
-      expect(r.aviso).toContain("17:00");
-    } else {
-      expect(info.abierta.salidaProgramada).toBe(desdeLocal(diaAtras(false, 1), "17:00").toISOString());
-    }
+    // A las 18 h también puede elegir "Salida": se cierra con la hora real
+    await svc.marcar("1001", { momento: a("06:00", 1), offline: true });
+    expect((await svc.marcar("1001", { momento: a("00:30", 2), offline: true, tipo: "SALIDA" })).tipo).toBe("SALIDA");
+    expect((await cerradas()).total).toBe(3);
+
+    // Más de 24 h sin salida: no se pregunta; el turno se cierra solo y la marcación es una entrada nueva
+    await svc.marcar("1001", { momento: a("01:00", 2), offline: true });
+    expect((await svc.situacionAbierta(db, { horarioId: horario.id }, { entrada: a("01:00", 2) }, a("02:00", 3)))).toMatchObject({ preguntar: false, vencida: true, puedeEntrar: true });
+    const tras = await svc.marcar("1001", { momento: a("02:00", 3), offline: true });
+    expect(tras.tipo).toBe("ENTRADA");
+    expect(tras.aviso).toBeTruthy();
   });
 });
 

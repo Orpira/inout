@@ -74,8 +74,9 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
       .where(eq(empleados.activo, true));
     return {
       generadoEn: new Date().toISOString(),
-      // Horas a partir de las cuales el kiosko deja de tratar un turno abierto como vigente.
+      // Con más horas sin salida el kiosko pregunta (maxHorasTurno) o da el turno por cerrado (horasCierreAutomatico).
       maxHorasTurno: env.MAX_HORAS_TURNO,
+      horasCierreAutomatico: Math.max(env.HORAS_CIERRE_AUTOMATICO, env.MAX_HORAS_TURNO),
       empleados: filas.map(({ horario, ...e }) => ({
         ...e,
         // Con esto el kiosko sabe, sin conexión, desde cuándo puede ofrecer una entrada nueva.

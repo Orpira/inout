@@ -165,7 +165,7 @@ Al recuperar la conexión, la tablet envía la cola en lotes y en orden cronoló
 - **Salidas tardías**: si un turno se cerró automáticamente (o pasó a revisión) por llevar demasiado tiempo abierto y luego llega su salida guardada, la salida real sustituye a la automática.
 - **Nada se pierde en silencio**: lo que no se puede aplicar (código dado de baja, marca de más de `MAX_HORAS_OFFLINE`, conflicto con otra marcación) aparece en **Marcaciones** y en el inicio para que un supervisor lo resuelva. Los toques repetidos se descartan solos.
 
-Reglas de marcación: sin turno abierto se registra la entrada; con una entrada sin salida el kiosko la muestra y pregunta si se marca la salida o una entrada nueva (en ese caso el turno olvidado se cierra con la hora de su horario); se ignoran repeticiones en menos de `ANTIREBOTE_SEGUNDOS`; un turno abierto más de `MAX_HORAS_TURNO` (24 h) se cierra solo con la hora de su horario, o pasa a revisión si el horario no da una referencia. Detalle en `docs/reglas-liquidacion.md`.
+Reglas de marcación: la misma acción alterna entrada y salida; si la entrada lleva más de `MAX_HORAS_TURNO` (16 h) sin salida, el kiosko la muestra y pregunta si se marca la salida o una entrada nueva (en ese caso el turno olvidado se cierra con la hora de su horario); se ignoran repeticiones en menos de `ANTIREBOTE_SEGUNDOS`; un turno abierto más de `HORAS_CIERRE_AUTOMATICO` (24 h) se cierra solo con la hora de su horario, o pasa a revisión si el horario no da una referencia. Detalle en `docs/reglas-liquidacion.md`.
 
 ## Reglas de liquidación
 

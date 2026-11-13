@@ -10,7 +10,7 @@ import {
   cola,
   directorioDisponible,
   encolar,
-  maxHorasTurno,
+  limitesTurno,
   registrarEstadoLocal,
   sincronizar,
 } from "../lib/kioskoOffline";
@@ -28,9 +28,10 @@ interface EmpleadoKiosko {
     entrada: string;
     /** Hora con la que el sistema cerraría ese turno (null = sin referencia: iría a revisión). */
     salidaProgramada: string | null;
-    /** Lleva más horas abierta de las permitidas: se cierra sola y esta marcación es una entrada. */
+    /** Lleva más horas de las de un turno normal: se pregunta si es la salida o una entrada nueva. */
+    preguntar: boolean;
+    /** Lleva tanto tiempo abierta que se cierra sola: esta marcación es una entrada. */
     vencida: boolean;
-    /** Puede registrar una entrada nueva ahora (su turno ya terminó según el horario). */
     puedeEntrar: boolean;
   } | null;
 }
@@ -161,14 +162,17 @@ export default function Kiosko() {
       return;
     }
     // Sin servidor, la situación del turno abierto se deduce de lo guardado en la tablet.
-    const ms = e?.abiertaDesde ? Date.now() - new Date(e.abiertaDesde).getTime() : 0;
-    const vencida = ms > maxHorasTurno() * 3_600_000;
+    const horas = e?.abiertaDesde ? (Date.now() - new Date(e.abiertaDesde).getTime()) / 3_600_000 : 0;
+    const limites = limitesTurno();
+    const vencida = horas > limites.cierre;
+    const preguntar = !vencida && horas > limites.preguntar;
     const abierta = e?.abiertaDesde
       ? {
           entrada: e.abiertaDesde,
           salidaProgramada: e.salidaProgramada ?? null,
+          preguntar,
           vencida,
-          puedeEntrar: vencida || !e.salidaProgramada || new Date(e.salidaProgramada).getTime() <= Date.now(),
+          puedeEntrar: vencida || (preguntar && (!e.salidaProgramada || new Date(e.salidaProgramada).getTime() <= Date.now())),
         }
       : null;
     setPaso({
@@ -469,7 +473,7 @@ function PasoMarcacion({
   error: string | null;
   onRegistrar: (elegido?: TipoMarca) => void;
 }) {
-  const abierta = empleado.abierta ?? (empleado.abiertaDesde ? { entrada: empleado.abiertaDesde, salidaProgramada: null, vencida: false, puedeEntrar: true } : null);
+  const abierta = empleado.abierta ?? (empleado.abiertaDesde ? { entrada: empleado.abiertaDesde, salidaProgramada: null, preguntar: false, vencida: false, puedeEntrar: false } : null);
   const aviso = error && (
     <p role="alert" className="mt-3 rounded-md bg-alerta-claro px-3 py-2 font-medium text-alerta">
       {error}
@@ -477,8 +481,8 @@ function PasoMarcacion({
   );
   const boton = "flex w-full items-center justify-center gap-3 rounded-lg font-bold disabled:opacity-60";
 
-  // Entrada sin salida todavía vigente: el empleado decide.
-  if (abierta && !abierta.vencida) {
+  // Entrada que lleva más horas de las de un turno normal: el empleado decide.
+  if (abierta?.preguntar) {
     const cierre = abierta.salidaProgramada
       ? `Tu turno anterior se cerrará con la salida de tu horario (${hora(abierta.salidaProgramada)}).`
       : "Tu turno anterior quedará para que lo revise tu supervisor.";
@@ -507,7 +511,7 @@ function PasoMarcacion({
         <p className="mt-2 text-[0.95rem] text-tinta-suave">
           {abierta.puedeEntrar
             ? `Elige "Entrada nueva" solo si olvidaste marcar la salida. ${cierre}`
-            : `Tu turno termina a las ${hora(abierta.salidaProgramada!)} según tu horario. Hasta entonces solo puedes marcar la salida.`}
+            : "Tu turno sigue en curso según tu horario: solo puedes marcar la salida."}
         </p>
       </>
     );
@@ -526,6 +530,11 @@ function PasoMarcacion({
             Ahora vas a registrar una entrada nueva.
           </p>
         </div>
+      )}
+      {abierta && !abierta.vencida && (
+        <p className="mt-4 rounded-md bg-petroleo-claro px-3 py-2 text-petroleo-oscuro">
+          Entraste <strong>{cuando(abierta.entrada, ahora)}</strong>. Llevas {duracion(minutosDesde(abierta.entrada, ahora))}.
+        </p>
       )}
       {aviso}
       <button
