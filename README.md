@@ -23,7 +23,7 @@ inout/
 ├── apps/api        Servidor HTTP: Fastify 5 + Drizzle ORM + PostgreSQL
 │                   · sesiones JWT en cookie httpOnly, roles ADMIN / SUPERVISOR
 │                   · validación con Zod, límites de peticiones, cabeceras de seguridad
-│                   · tarea periódica que cierra los turnos sin salida (24 h)   
+│                   · tarea periódica que cierra los turnos sin salida (16 h)   
 └── apps/web        Cliente: React 19 + Vite + Tailwind CSS 4 + TanStack Query
 ```
 
@@ -40,7 +40,7 @@ En producción la API sirve también el frontend compilado: un solo proceso, un 
 | Recargo dominical fijo del 75 % | 80 % (jul-2025), 90 % (jul-2026), 100 % (jul-2027) aplicados por fecha |
 | Faltaban Ascensión, Corpus Christi, Sagrado Corazón, 8 de diciembre y 9 de julio; todos los domingos marcados como festivo | Calendario completo y ajustable desde el panel |
 | Cálculo por franjas con casos especiales que fallaba al cruzar medianoche | Motor minuto a minuto: medianoche, paso a domingo/festivo y cambios normativos sin casos especiales |
-| El cierre automático inventaba una salida a las 18:00 (de otra fecha) | A las 24 h el turno se cierra con la hora del horario del empleado ese día y queda marcado como **salida automática**; sin referencia en el horario pasa a **Por revisar** |
+| El cierre automático inventaba una salida a las 18:00 (de otra fecha) | A las 16 h el turno se cierra con la hora del horario del empleado ese día y queda marcado como **salida automática**; sin referencia en el horario pasa a **Por revisar** |
 | Misma jornada para todos y el almuerzo contaba como tiempo trabajado | Horarios por grupo (fijo o por turnos) con descanso no remunerado, tolerancia y aprobación de extras |
 | Las marcaciones sin red se perdían si se recargaba la página | PWA instalable con directorio local, cola con identificador único y sincronización idempotente |
 | Historial de cambios concatenado en un campo de texto | Tabla de auditoría con usuario, motivo y valores antes/después |
@@ -165,7 +165,7 @@ Al recuperar la conexión, la tablet envía la cola en lotes y en orden cronoló
 - **Salidas tardías**: si un turno se cerró automáticamente (o pasó a revisión) por llevar demasiado tiempo abierto y luego llega su salida guardada, la salida real sustituye a la automática.
 - **Nada se pierde en silencio**: lo que no se puede aplicar (código dado de baja, marca de más de `MAX_HORAS_OFFLINE`, conflicto con otra marcación) aparece en **Marcaciones** y en el inicio para que un supervisor lo resuelva. Los toques repetidos se descartan solos.
 
-Reglas de marcación: la misma acción alterna entrada y salida; si la entrada lleva más de `MAX_HORAS_TURNO` (16 h) sin salida, el kiosko la muestra y pregunta si se marca la salida o una entrada nueva (en ese caso el turno olvidado se cierra con la hora de su horario); se ignoran repeticiones en menos de `ANTIREBOTE_SEGUNDOS`; un turno abierto más de `HORAS_CIERRE_AUTOMATICO` (24 h) se cierra solo con la hora de su horario, o pasa a revisión si el horario no da una referencia. Detalle en `docs/reglas-liquidacion.md`.
+Reglas de marcación: la misma acción alterna entrada y salida; se ignoran repeticiones en menos de `ANTIREBOTE_SEGUNDOS`; un turno abierto más de `MAX_HORAS_TURNO` (16 h) se cierra solo con la hora de su horario, o pasa a revisión si el horario no da una referencia. Detalle en `docs/reglas-liquidacion.md`.
 
 ## Reglas de liquidación
 

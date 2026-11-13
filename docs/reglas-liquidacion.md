@@ -72,13 +72,13 @@ El calendario se puede ajustar desde **Festivos y normas** (días cívicos, o si
 
 ## Entradas sin salida
 
-- **Turno normal** (menos de `MAX_HORAS_TURNO`, 16 h). La marcación alterna entrada y salida, sin preguntas.
-- **Más de 16 h sin salida.** Al escribir su código, el kiosko muestra la entrada pendiente y pregunta qué registra: **Salida** (cierra el turno con la hora actual) o **Entrada nueva** (olvidó marcar la salida). Con entrada nueva, el turno olvidado se cierra con la **salida programada** y se abre el nuevo.
-- **Más de 24 h sin salida** (`HORAS_CIERRE_AUTOMATICO`). El turno se cierra solo con la salida programada, vuelva o no el empleado (tarea cada 10 minutos). Si vuelve a marcar antes de que pase la tarea, registra directamente una entrada nueva.
+- **Turno normal** (menos de `MAX_HORAS_TURNO`, 16 h). La marcación alterna entrada y salida.
+- **Más de 16 h sin salida.** El turno se cierra solo con la **salida programada**, vuelva o no el empleado (tarea cada 10 minutos). No se pregunta nada al empleado.
+- **Si el empleado vuelve antes de que pase la tarea**, el kiosko le muestra la entrada que quedó sin salida y con qué hora se cierra, y su marcación se registra como una entrada nueva.
 - **Salida programada.** Horario fijo: la hora de salida del horario ese día. Turnos o sin horario: entrada + jornada ordinaria del día + descanso (7 h con la jornada legal).
 - **Sin referencia** (día no laborable del horario, o entrada posterior a la hora de salida): el turno pasa a **por revisar**, sin inventar la salida.
 - **Marca visible.** El turno cerrado así queda como «salida automática» (filtro en Marcaciones, observación y auditoría `CIERRE_AUTOMATICO`) y **se liquida** como cualquier turno cerrado. Si el supervisor corrige la hora, la marca desaparece.
-- **Sin conexión.** La elección del empleado viaja con la marca. Una salida real guardada en la tablet que llega después sustituye a la automática.
+- **Sin conexión.** Una salida real guardada en la tablet que llega después sustituye a la automática.
 
 ## Cierre de periodos liquidados
 

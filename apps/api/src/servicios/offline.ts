@@ -10,8 +10,6 @@ export interface MarcaOfflineEntrada {
   codigo: string;
   /** Hora de captura según el reloj del dispositivo. */
   capturadoEn: Date;
-  /** Entrada o salida elegida por el empleado en el kiosko (si se le preguntó). */
-  tipo?: "ENTRADA" | "SALIDA";
 }
 
 export interface ResultadoSincronizacion {
@@ -65,7 +63,7 @@ export class ServicioOffline {
         dispositivo,
       };
       try {
-        const r = await this.marcaciones.marcar(m.codigo, { momento, offline: true, tipo: m.tipo });
+        const r = await this.marcaciones.marcar(m.codigo, { momento, offline: true });
         const fila = {
           ...base,
           estado: "APLICADA" as const,

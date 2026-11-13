@@ -44,13 +44,8 @@ export class ServicioMarcaciones {
   constructor(
     private readonly db: Db,
     private readonly calendario: ServicioCalendario,
-    private readonly env: Pick<Env, "MAX_HORAS_TURNO" | "ANTIREBOTE_SEGUNDOS" | "MAX_HORAS_OFFLINE"> & Partial<Pick<Env, "HORAS_CIERRE_AUTOMATICO">>,
+    private readonly env: Pick<Env, "MAX_HORAS_TURNO" | "ANTIREBOTE_SEGUNDOS" | "MAX_HORAS_OFFLINE">,
   ) {}
-
-  /** Horas sin salida tras las cuales el turno se cierra solo. Nunca antes de MAX_HORAS_TURNO. */
-  private get horasCierre() {
-    return Math.max(this.env.HORAS_CIERRE_AUTOMATICO ?? 24, this.env.MAX_HORAS_TURNO);
-  }
 
   /** Horario asignado al empleado o, si no tiene, la jornada legal de lunes a sábado. */
   private async horarioDe(tx: DbTx, empleado: Pick<Empleado, "horarioId">, fecha: string): Promise<Horario> {
@@ -63,23 +58,14 @@ export class ServicioMarcaciones {
 
   /**
    * Situación de un turno abierto frente a una nueva marcación en `momento`:
-   * - Menos de MAX_HORAS_TURNO: turno normal; la marcación es su salida.
-   * - `preguntar`: lleva más de MAX_HORAS_TURNO; el kiosko pregunta si es la salida o una entrada nueva.
-   * - `vencida`: lleva más de HORAS_CIERRE_AUTOMATICO; se cierra sola y la marcación es una entrada nueva.
-   * - `salidaProgramada`: hora con la que el sistema lo cerraría (null = sin referencia; iría a revisión).
-   * - `puedeEntrar`: si se admite una entrada nueva ahora.
+   * - `vencida`: lleva más de MAX_HORAS_TURNO sin salida. El sistema lo cierra solo y la marcación es una entrada nueva.
+   * - `salidaProgramada`: hora con la que se cierra (null = sin referencia en el horario; va a revisión).
    */
   async situacionAbierta(tx: DbTx, empleado: Pick<Empleado, "horarioId">, abierta: Pick<Marcacion, "entrada">, momento = new Date()) {
-    const programada = salidaProgramada(await this.horarioDe(tx, empleado, fechaLocal(abierta.entrada)), abierta.entrada);
-    const horas = (momento.getTime() - abierta.entrada.getTime()) / 3_600_000;
-    const vencida = horas > this.horasCierre;
-    const preguntar = !vencida && horas > this.env.MAX_HORAS_TURNO;
     return {
       entrada: abierta.entrada,
-      salidaProgramada: programada,
-      preguntar,
-      vencida,
-      puedeEntrar: vencida || (preguntar && (!programada || programada.getTime() <= momento.getTime())),
+      salidaProgramada: salidaProgramada(await this.horarioDe(tx, empleado, fechaLocal(abierta.entrada)), abierta.entrada),
+      vencida: momento.getTime() - abierta.entrada.getTime() > this.env.MAX_HORAS_TURNO * 3_600_000,
     };
   }
 
@@ -103,15 +89,12 @@ export class ServicioMarcaciones {
   }
 
   /**
-   * Marcación desde el kiosko.
-   * - Sin turno abierto: registra la entrada.
-   * - Con turno abierto de menos de MAX_HORAS_TURNO: registra la salida.
-   * - Con turno abierto de más de MAX_HORAS_TURNO: el empleado elige (`tipo`). SALIDA lo cierra con la hora
-   *   actual; ENTRADA cierra el turno olvidado con la hora de su horario y abre uno nuevo. Sin `tipo`, SALIDA.
-   * - Con turno abierto de más de HORAS_CIERRE_AUTOMATICO: se cierra solo y esta marcación es una entrada nueva.
+   * Marcación desde el kiosko: abre o cierra el turno según el estado actual.
+   * Si el turno abierto lleva más de MAX_HORAS_TURNO sin salida, se cierra con la hora del horario
+   * y esta marcación es una entrada nueva.
    * `momento` permite sincronizar marcaciones capturadas sin conexión.
    */
-  async marcar(codigo: string, opciones: { momento?: Date; offline?: boolean; tipo?: TipoMarca } = {}): Promise<ResultadoMarca> {
+  async marcar(codigo: string, opciones: { momento?: Date; offline?: boolean } = {}): Promise<ResultadoMarca> {
     const ahora = new Date();
     const momento = opciones.momento ?? ahora;
     if (opciones.momento) {
@@ -147,17 +130,9 @@ export class ServicioMarcaciones {
           throw conflicto("Ya registraste tu entrada hace un momento.", "MARCA_DUPLICADA");
         }
         const sit = await this.situacionAbierta(tx, empleado, abierta, momento);
-        if (sit.vencida || opciones.tipo === "ENTRADA") {
-          if (!sit.puedeEntrar) {
-            throw conflicto("Tu turno sigue en curso. Si ya te vas, marca la salida.", "TURNO_EN_CURSO");
-          }
+        if (sit.vencida) {
           // Turno olvidado: se cierra con la hora del horario (o va a revisión si no hay referencia) y se abre uno nuevo.
-          const aviso = await this.cerrarOlvidada(
-            tx,
-            abierta,
-            sit.salidaProgramada,
-            sit.vencida ? `Sin salida registrada en ${this.horasCierre} h` : "El empleado registró una entrada nueva sin haber marcado la salida",
-          );
+          const aviso = await this.cerrarOlvidada(tx, abierta, sit.salidaProgramada, `Sin salida registrada en ${this.env.MAX_HORAS_TURNO} h`);
           const nueva = await this.crearEntrada(tx, empleado.id, momento, origen);
           return { tipo: "ENTRADA", marcacion: nueva, empleado: resumenEmpleado(empleado), aviso };
         }
@@ -176,19 +151,15 @@ export class ServicioMarcaciones {
       const olvidada = ultima && ((ultima.estado === "REVISION" && !ultima.salida) || (ultima.estado === "CERRADA" && ultima.salidaAutomatica));
       if (
         opciones.offline &&
-        opciones.tipo !== "ENTRADA" &&
         ultima &&
         olvidada &&
         momento.getTime() > ultima.entrada.getTime() &&
-        momento.getTime() - ultima.entrada.getTime() <= this.horasCierre * 3_600_000
+        momento.getTime() - ultima.entrada.getTime() <= this.env.MAX_HORAS_TURNO * 3_600_000
       ) {
         await tx.update(marcaciones).set({ salidaAutomatica: false }).where(eq(marcaciones.id, ultima.id));
         const cerrada = await this.cerrar(tx, ultima, momento);
         await this.auditar(tx, null, ultima.id, "CERRAR_SIN_CONEXION", "Salida recibida del kiosko al recuperar la conexión", instantanea(ultima), instantanea(cerrada));
         return { tipo: "SALIDA", marcacion: cerrada, empleado: resumenEmpleado(empleado) };
-      }
-      if (opciones.tipo === "SALIDA") {
-        throw conflicto("No tienes una entrada pendiente de salida.", "SIN_ENTRADA_ABIERTA");
       }
       if (ultima?.salida && momento.getTime() - ultima.salida.getTime() < antirreboteMs) {
         throw conflicto("Ya registraste tu salida hace un momento.", "MARCA_DUPLICADA");
@@ -571,11 +542,11 @@ export class ServicioMarcaciones {
   }
 
   /**
-   * Turnos abiertos que superan HORAS_CIERRE_AUTOMATICO sin salida: se cierran con la hora de su horario,
+   * Turnos abiertos que superan MAX_HORAS_TURNO sin salida: se cierran con la hora de su horario,
    * o pasan a revisión si el horario no da una referencia.
    */
   async cerrarVencidas(): Promise<{ cerradas: number; aRevision: number }> {
-    const limite = new Date(Date.now() - this.horasCierre * 3_600_000);
+    const limite = new Date(Date.now() - this.env.MAX_HORAS_TURNO * 3_600_000);
     const vencidas = await this.db
       .select({ id: marcaciones.id })
       .from(marcaciones)
@@ -588,7 +559,7 @@ export class ServicioMarcaciones {
         await tx.execute(sql`select pg_advisory_xact_lock(${m.empleadoId})`);
         const [e] = await tx.select().from(empleados).where(eq(empleados.id, m.empleadoId));
         const programada = salidaProgramada(await this.horarioDe(tx, e!, fechaLocal(m.entrada)), m.entrada);
-        await this.cerrarOlvidada(tx, m, programada, `Sin salida registrada en ${this.horasCierre} h`);
+        await this.cerrarOlvidada(tx, m, programada, `Sin salida registrada en ${this.env.MAX_HORAS_TURNO} h`);
         if (programada) r.cerradas++;
         else r.aRevision++;
       });

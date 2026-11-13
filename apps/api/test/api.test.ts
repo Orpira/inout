@@ -137,7 +137,7 @@ describe("kiosko", () => {
     expect(det.historial.map((h: { accion: string }) => h.accion)).toEqual(["EDITAR", "CIERRE_AUTOMATICO", "CREAR"]);
   });
 
-  it("con una entrada sin salida el empleado elige entre salida y entrada nueva", async () => {
+  it("un turno normal alterna entrada y salida; pasadas 16 h se cierra solo y la marcación es una entrada nueva", async () => {
     const horario = (await api("POST", "/api/horarios", {
       nombre: "Oficina",
       tipo: "FIJO",
@@ -146,49 +146,41 @@ describe("kiosko", () => {
       toleranciaMinutos: 0,
       requiereAprobacion: false,
     })).json();
-    const { id } = await crearEmpleado({ horarioId: horario.id });
-    const marcar = (tipo?: string) => app.inject({ method: "POST", url: "/api/kiosko/marcar", payload: { codigo: "1001", ...(tipo ? { tipo } : {}) } });
-
-    // Sin turno abierto no hay nada que cerrar
-    expect((await marcar("SALIDA")).json().codigo).toBe("SIN_ENTRADA_ABIERTA");
-
-    // Entró el día D a las 08:00 (marcas con su hora, como llegan del kiosko sin conexión)
+    await crearEmpleado({ horarioId: horario.id });
+    // Marcas con su hora, como llegan del kiosko sin conexión. D es un día de lunes a viernes.
     const D = diaAtras(false, 4);
     const a = (h: string, dias = 0) => desdeLocal(sumarDias(D, dias), h);
     const svc = app.ctx.marcaciones;
     const cerradas = async () => (await api("GET", "/api/marcaciones?desde=2020-01-01&hasta=2100-01-01&estado=CERRADA")).json();
+
+    // Turno normal: entrada y, 12 h después, salida con la hora real
     expect((await svc.marcar("1001", { momento: a("08:00"), offline: true })).tipo).toBe("ENTRADA");
+    expect(await svc.situacionAbierta(db, { horarioId: horario.id }, { entrada: a("08:00") }, a("20:00"))).toMatchObject({ vencida: false });
+    const salida = await svc.marcar("1001", { momento: a("20:00"), offline: true });
+    expect(salida.tipo).toBe("SALIDA");
+    expect(salida.aviso).toBeUndefined();
+    expect((await cerradas()).datos[0]).toMatchObject({ salidaAutomatica: false, minutosTotales: 11 * 60 });
 
-    // Con menos de 16 h es un turno normal: no admite una entrada nueva, la marcación es la salida
-    await expect(svc.marcar("1001", { momento: a("20:00"), offline: true, tipo: "ENTRADA" })).rejects.toMatchObject({ codigo: "TURNO_EN_CURSO" });
-    expect((await svc.situacionAbierta(db, { horarioId: horario.id }, { entrada: a("08:00") }, a("20:00")))).toMatchObject({ preguntar: false, vencida: false, puedeEntrar: false });
-
-    // A las 18 h sin salida el kiosko pregunta. Elige "Entrada": el turno olvidado se cierra a las 17:00
-    expect((await svc.situacionAbierta(db, { horarioId: horario.id }, { entrada: a("08:00") }, a("02:00", 1)))).toMatchObject({ preguntar: true, vencida: false, puedeEntrar: true });
-    const nueva = await svc.marcar("1001", { momento: a("02:00", 1), offline: true, tipo: "ENTRADA" });
+    // Olvida la salida: 18 h después vuelve a marcar. El turno se cierra a las 17:00 del horario y entra de nuevo
+    const D1 = sumarDias(D, 1);
+    const laborable = diaSemana(D1) >= 1 && diaSemana(D1) <= 5;
+    await svc.marcar("1001", { momento: a("08:00", 1), offline: true });
+    const sit = await svc.situacionAbierta(db, { horarioId: horario.id }, { entrada: a("08:00", 1) }, a("02:00", 2));
+    expect(sit.vencida).toBe(true);
+    expect(sit.salidaProgramada?.toISOString() ?? null).toBe(laborable ? a("17:00", 1).toISOString() : null);
+    const nueva = await svc.marcar("1001", { momento: a("02:00", 2), offline: true });
     expect(nueva.tipo).toBe("ENTRADA");
-    expect(nueva.aviso).toContain("17:00");
-    let lista = await cerradas();
-    expect(lista.total).toBe(1);
-    expect(lista.datos[0]).toMatchObject({ salidaAutomatica: true, minutosTotales: 8 * 60, minutosExtra: 0 });
-    expect(lista.datos[0].salida).toBe(a("17:00").toISOString());
-
-    // Turno normal: se cierra con la hora de la marcación
-    expect((await svc.marcar("1001", { momento: a("05:00", 1), offline: true })).tipo).toBe("SALIDA");
-    lista = await cerradas();
-    expect(lista.datos.map((m: { salidaAutomatica: boolean }) => m.salidaAutomatica).sort()).toEqual([false, true]);
-
-    // A las 18 h también puede elegir "Salida": se cierra con la hora real
-    await svc.marcar("1001", { momento: a("06:00", 1), offline: true });
-    expect((await svc.marcar("1001", { momento: a("00:30", 2), offline: true, tipo: "SALIDA" })).tipo).toBe("SALIDA");
-    expect((await cerradas()).total).toBe(3);
-
-    // Más de 24 h sin salida: no se pregunta; el turno se cierra solo y la marcación es una entrada nueva
-    await svc.marcar("1001", { momento: a("01:00", 2), offline: true });
-    expect((await svc.situacionAbierta(db, { horarioId: horario.id }, { entrada: a("01:00", 2) }, a("02:00", 3)))).toMatchObject({ preguntar: false, vencida: true, puedeEntrar: true });
-    const tras = await svc.marcar("1001", { momento: a("02:00", 3), offline: true });
-    expect(tras.tipo).toBe("ENTRADA");
-    expect(tras.aviso).toBeTruthy();
+    const lista = (await api("GET", "/api/marcaciones?desde=2020-01-01&hasta=2100-01-01")).json();
+    expect(lista.total).toBe(3);
+    const olvidado = lista.datos.find((m: { entrada: string }) => m.entrada === a("08:00", 1).toISOString());
+    if (laborable) {
+      expect(nueva.aviso).toContain("17:00");
+      expect(olvidado).toMatchObject({ estado: "CERRADA", salidaAutomatica: true, minutosTotales: 8 * 60, minutosExtra: 0 });
+      expect(olvidado.salida).toBe(a("17:00", 1).toISOString());
+    } else {
+      // Sábado: el horario no da una hora de salida y el turno queda por revisar
+      expect(olvidado).toMatchObject({ estado: "REVISION", salida: null, salidaAutomatica: false });
+    }
   });
 });
 
@@ -366,7 +358,7 @@ describe("horarios y aprobación de horas extra", () => {
 
 describe("kiosko sin conexión", () => {
   const uuid = () => crypto.randomUUID();
-  const sincronizar = (marcas: { id: string; codigo: string; capturadoEn: string; tipo?: string }[], enviadoEn = new Date()) =>
+  const sincronizar = (marcas: { id: string; codigo: string; capturadoEn: string }[], enviadoEn = new Date()) =>
     app.inject({ method: "POST", url: "/api/kiosko/sincronizar", payload: { enviadoEn: enviadoEn.toISOString(), dispositivo: "Tablet bodega", marcas } });
 
   it("aplica en orden, corrige el reloj del dispositivo y es idempotente", async () => {
@@ -412,7 +404,7 @@ describe("kiosko sin conexión", () => {
     await api("POST", "/api/marcaciones", { empleadoId: id, entrada: desdeLocal(dia, "08:00").toISOString(), motivo: "Entrada de prueba" });
     expect(await app.ctx.marcaciones.cerrarVencidas()).toEqual({ cerradas: 1, aRevision: 0 });
     // La tablet guardó la salida real (17:00) y la envía días después
-    const r = (await sincronizar([{ id: uuid(), codigo: "1001", capturadoEn: desdeLocal(dia, "17:00").toISOString(), tipo: "SALIDA" }])).json();
+    const r = (await sincronizar([{ id: uuid(), codigo: "1001", capturadoEn: desdeLocal(dia, "17:00").toISOString() }])).json();
     expect(r.resultados[0]).toMatchObject({ estado: "APLICADA", tipo: "SALIDA" });
     const lista = (await api("GET", "/api/marcaciones?desde=2020-01-01&hasta=2100-01-01")).json();
     expect(lista.total).toBe(1);

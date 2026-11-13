@@ -12,8 +12,6 @@ export interface MarcaPendiente {
   id: string;
   codigo: string;
   capturadoEn: string;
-  /** Lo que eligió el empleado cuando tenía una entrada sin salida. */
-  tipo?: "ENTRADA" | "SALIDA";
 }
 
 export interface EmpleadoDirectorio {
@@ -29,7 +27,6 @@ export interface EmpleadoDirectorio {
 interface Directorio {
   generadoEn: string | null;
   maxHorasTurno?: number;
-  horasCierreAutomatico?: number;
   deshabilitado?: boolean;
   empleados: Record<string, EmpleadoDirectorio>;
 }
@@ -91,10 +88,10 @@ export function cola(): MarcaPendiente[] {
 }
 
 /** Guarda una marcación en la tablet y actualiza el estado local del empleado. */
-export function encolar(codigo: string, momento = new Date(), elegido?: "ENTRADA" | "SALIDA"): { marca: MarcaPendiente; tipo: "ENTRADA" | "SALIDA" | null } {
-  const marca: MarcaPendiente = { id: uuid(), codigo, capturadoEn: momento.toISOString(), ...(elegido ? { tipo: elegido } : {}) };
+export function encolar(codigo: string, momento = new Date()): { marca: MarcaPendiente; tipo: "ENTRADA" | "SALIDA" | null } {
+  const marca = { id: uuid(), codigo, capturadoEn: momento.toISOString() };
   escribir(K_COLA, [...cola(), marca]);
-  const tipo = alternarEstadoLocal(codigo, momento, elegido);
+  const tipo = alternarEstadoLocal(codigo, momento);
   return { marca, tipo };
 }
 
@@ -146,12 +143,12 @@ export const directorioDisponible = () => {
 
 export async function actualizarDirectorio(): Promise<void> {
   try {
-    const r = await api<{ generadoEn: string; maxHorasTurno?: number; horasCierreAutomatico?: number; empleados: EmpleadoDirectorio[] }>("/kiosko/directorio", { timeoutMs: 15000 });
+    const r = await api<{ generadoEn: string; maxHorasTurno?: number; empleados: EmpleadoDirectorio[] }>("/kiosko/directorio", { timeoutMs: 15000 });
     const pendientes = cola();
     const empleados = Object.fromEntries(r.empleados.map((e) => [e.identificacion, e]));
-    escribir(K_DIR, { generadoEn: r.generadoEn, maxHorasTurno: r.maxHorasTurno, horasCierreAutomatico: r.horasCierreAutomatico, empleados });
+    escribir(K_DIR, { generadoEn: r.generadoEn, maxHorasTurno: r.maxHorasTurno, empleados });
     // Reaplica sobre el directorio las marcas que aún no llegaron al servidor.
-    for (const m of pendientes) alternarEstadoLocal(m.codigo, new Date(m.capturadoEn), m.tipo);
+    for (const m of pendientes) alternarEstadoLocal(m.codigo, new Date(m.capturadoEn));
   } catch (e) {
     if (e instanceof ErrorApi && e.codigo === "DIRECTORIO_DESHABILITADO") {
       escribir(K_DIR, { generadoEn: null, deshabilitado: true, empleados: {} });
@@ -163,18 +160,15 @@ export function buscarEnDirectorio(codigo: string): EmpleadoDirectorio | null {
   return directorio().empleados[codigo] ?? null;
 }
 
-/** Límites que informa el servidor: desde cuántas horas se pregunta y desde cuántas el turno se da por cerrado. */
-export const limitesTurno = () => {
-  const d = directorio();
-  return { preguntar: d.maxHorasTurno ?? 16, cierre: d.horasCierreAutomatico ?? 24 };
-};
+/** Horas sin salida tras las cuales el sistema da el turno por cerrado (lo informa el servidor; 16 por defecto). */
+export const maxHorasTurno = () => directorio().maxHorasTurno ?? 16;
 
-function alternarEstadoLocal(codigo: string, momento: Date, elegido?: "ENTRADA" | "SALIDA"): "ENTRADA" | "SALIDA" | null {
+function alternarEstadoLocal(codigo: string, momento: Date): "ENTRADA" | "SALIDA" | null {
   const d = directorio();
   const e = d.empleados[codigo];
   if (!e) return null;
-  const vencida = !!e.abiertaDesde && momento.getTime() - new Date(e.abiertaDesde).getTime() > (d.horasCierreAutomatico ?? 24) * 3_600_000;
-  const tipo = elegido ?? (e.abiertaDesde && !vencida ? "SALIDA" : "ENTRADA");
+  const vencida = !!e.abiertaDesde && momento.getTime() - new Date(e.abiertaDesde).getTime() > (d.maxHorasTurno ?? 16) * 3_600_000;
+  const tipo = e.abiertaDesde && !vencida ? "SALIDA" : "ENTRADA";
   e.abiertaDesde = tipo === "ENTRADA" ? momento.toISOString() : null;
   e.salidaProgramada = null;
   escribir(K_DIR, d);

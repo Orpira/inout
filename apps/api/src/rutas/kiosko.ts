@@ -20,8 +20,6 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
 
   const limite = { rateLimit: { max: 60, timeWindow: "1 minute" } };
   const codigo = z.string().trim().min(1).max(40);
-  /** Lo que eligió el empleado cuando tenía una entrada sin salida. */
-  const tipoMarca = z.enum(["ENTRADA", "SALIDA"]);
 
   r.get(
     "/empleado/:codigo",
@@ -31,9 +29,9 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
 
   r.post(
     "/marcar",
-    { config: limite, schema: { body: z.object({ codigo, tipo: tipoMarca.optional() }) } },
+    { config: limite, schema: { body: z.object({ codigo }) } },
     async (req) => {
-      const r = await marcaciones.marcar(req.body.codigo, { tipo: req.body.tipo });
+      const r = await marcaciones.marcar(req.body.codigo);
       return {
         tipo: r.tipo,
         empleado: r.empleado,
@@ -74,12 +72,11 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
       .where(eq(empleados.activo, true));
     return {
       generadoEn: new Date().toISOString(),
-      // Con más horas sin salida el kiosko pregunta (maxHorasTurno) o da el turno por cerrado (horasCierreAutomatico).
+      // Con más horas sin salida, el kiosko da el turno por cerrado y la marcación es una entrada nueva.
       maxHorasTurno: env.MAX_HORAS_TURNO,
-      horasCierreAutomatico: Math.max(env.HORAS_CIERRE_AUTOMATICO, env.MAX_HORAS_TURNO),
       empleados: filas.map(({ horario, ...e }) => ({
         ...e,
-        // Con esto el kiosko sabe, sin conexión, desde cuándo puede ofrecer una entrada nueva.
+        // Con esto el kiosko puede decir, sin conexión, con qué hora se cerrará un turno olvidado.
         salidaProgramada: e.abiertaDesde ? salidaProgramada(horario ?? horarioLegalPorDefecto(fechaLocal(e.abiertaDesde)), e.abiertaDesde) : null,
       })),
     };
@@ -100,7 +97,6 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
                 id: z.string().uuid(),
                 codigo,
                 capturadoEn: z.string().datetime({ offset: true }).transform((v) => new Date(v)),
-                tipo: tipoMarca.optional(),
               }),
             )
             .max(500),
