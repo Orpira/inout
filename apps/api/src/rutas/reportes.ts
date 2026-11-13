@@ -157,9 +157,11 @@ export const rutasReportes: Rutas = (app, { db }) => {
         pesos(f.valorTotal),
         f.alertas.join(" | "),
       ]);
+      // Con filtro de empleado, el archivo lleva su identificación para no confundirlo con el general.
+      const sufijo = empleadoId && datos[0] ? `_${datos[0].identificacion.replace(/[^\w-]/g, "")}` : "";
       reply
         .header("Content-Type", "text/csv; charset=utf-8")
-        .header("Content-Disposition", `attachment; filename="liquidacion_${desde}_${hasta}.csv"`);
+        .header("Content-Disposition", `attachment; filename="liquidacion${sufijo}_${desde}_${hasta}.csv"`);
       return aCsv([encabezado, ...cuerpo]);
     }
     return { desde, hasta, datos, totales };
