@@ -165,6 +165,25 @@ describe("marcaciones manuales, edición y reportes", () => {
     expect(csv.headers["content-type"]).toContain("text/csv");
     expect(csv.body).toContain("Laura Gómez");
 
+    // Filtro por empleado: el reporte y el CSV traen solo al seleccionado
+    const otro = await crearEmpleado({ identificacion: "1002" });
+    await api("POST", "/api/marcaciones", {
+      empleadoId: otro.id,
+      entrada: desdeLocal("2026-11-05", "08:00").toISOString(),
+      salida: desdeLocal("2026-11-05", "19:00").toISOString(),
+      motivo: "Turno del segundo empleado",
+    });
+    const todos = (await api("GET", "/api/reportes/liquidacion?desde=2026-11-01&hasta=2026-11-30")).json();
+    expect(todos.datos).toHaveLength(2);
+    const solo = (await api("GET", `/api/reportes/liquidacion?desde=2026-11-01&hasta=2026-11-30&empleadoId=${otro.id}`)).json();
+    expect(solo.datos.map((f: { identificacion: string }) => f.identificacion)).toEqual(["1002"]);
+    expect(solo.totales.minutosExtra).toBe(todos.totales.minutosExtra - 60);
+    const csvSolo = await api("GET", `/api/reportes/liquidacion?desde=2026-11-01&hasta=2026-11-30&empleadoId=${otro.id}&formato=csv`);
+    expect(csvSolo.body.trim().split("\r\n")).toHaveLength(2);
+    expect(csvSolo.body).toContain("1002");
+    expect(csvSolo.headers["content-disposition"]).toContain("liquidacion_1002_2026-11-01_2026-11-30.csv");
+    await api("POST", `/api/marcaciones/${(await api("GET", `/api/marcaciones?empleadoId=${otro.id}`)).json().datos[0].id}/anular`, { motivo: "Limpieza de la prueba" });
+
     const anular = await api("POST", `/api/marcaciones/${m.id}/anular`, { motivo: "Registro duplicado" });
     expect(anular.json().estado).toBe("ANULADA");
     const rep2 = (await api("GET", "/api/reportes/liquidacion?desde=2026-11-01&hasta=2026-11-30")).json();

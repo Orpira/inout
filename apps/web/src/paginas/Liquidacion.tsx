@@ -5,8 +5,8 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { Cargando, Encabezado, MensajeError, Vacio } from "../componentes/ui";
 import { api, descargar } from "../lib/api";
-import { fechaISOCorta, horasDecimales, hoyLocal, pesos } from "../lib/formato";
-import type { ReporteLiquidacion } from "../lib/tipos";
+import { fechaISOCorta, horasDecimales, hoyLocal, nombreCompleto, pesos } from "../lib/formato";
+import type { Empleado, ReporteLiquidacion } from "../lib/tipos";
 
 const RECARGOS: Categoria[] = ["ORD_NOCTURNA", "ORD_DIURNA_DF", "ORD_NOCTURNA_DF"];
 const EXTRAS: Categoria[] = ["EXT_DIURNA", "EXT_NOCTURNA", "EXT_DIURNA_DF", "EXT_NOCTURNA_DF"];
@@ -27,9 +27,14 @@ function periodos() {
 export default function Liquidacion() {
   const ps = periodos();
   const [rango, setRango] = useState({ desde: ps[2]!.desde, hasta: ps[2]!.hasta });
+  const [empleadoId, setEmpleadoId] = useState("");
+  // Incluye inactivos: alguien dado de baja puede tener turnos por liquidar en el periodo.
+  const emps = useQuery({ queryKey: ["empleados", "todos"], queryFn: () => api<{ datos: Empleado[] }>("/empleados?estado=todos") });
+  const empleado = emps.data?.datos.find((e) => String(e.id) === empleadoId);
+  const consulta = `/reportes/liquidacion?desde=${rango.desde}&hasta=${rango.hasta}${empleadoId ? `&empleadoId=${empleadoId}` : ""}`;
   const q = useQuery({
-    queryKey: ["liquidacion", rango],
-    queryFn: () => api<ReporteLiquidacion>(`/reportes/liquidacion?desde=${rango.desde}&hasta=${rango.hasta}`),
+    queryKey: ["liquidacion", rango, empleadoId],
+    queryFn: () => api<ReporteLiquidacion>(consulta),
   });
 
   return (
@@ -38,7 +43,11 @@ export default function Liquidacion() {
         titulo="Liquidación de recargos y horas extra"
         descripcion="Valores a pagar adicionales al salario, por empleado, para los turnos cerrados del periodo. Los turnos por revisar y las horas extra sin aprobar no se incluyen hasta que se resuelvan."
         acciones={
-          <button className="btn btn-secundario" onClick={() => descargar(`/reportes/liquidacion?desde=${rango.desde}&hasta=${rango.hasta}&formato=csv`)}>
+          <button
+            className="btn btn-secundario"
+            title={empleado ? `Solo ${nombreCompleto(empleado)}` : "Todos los empleados del periodo"}
+            onClick={() => descargar(`${consulta}&formato=csv`)}
+          >
             <Download size={16} /> Descargar para nómina (CSV)
           </button>
         }
@@ -67,6 +76,18 @@ export default function Liquidacion() {
         <div>
           <label className="etiqueta" htmlFor="l-hasta">Hasta</label>
           <input id="l-hasta" type="date" className="campo w-40" value={rango.hasta} onChange={(e) => setRango({ ...rango, hasta: e.target.value })} />
+        </div>
+        <div>
+          <label className="etiqueta" htmlFor="l-emp">Empleado</label>
+          <select id="l-emp" className="campo w-64" value={empleadoId} onChange={(e) => setEmpleadoId(e.target.value)}>
+            <option value="">Todos los empleados</option>
+            {emps.data?.datos.map((e) => (
+              <option key={e.id} value={e.id}>
+                {nombreCompleto(e)} · {e.identificacion}
+                {e.activo ? "" : " (inactivo)"}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -106,7 +127,7 @@ export default function Liquidacion() {
 
           <div className="panel overflow-x-auto">
             {q.data.datos.length === 0 ? (
-              <Vacio titulo="No hay turnos cerrados en este periodo" />
+              <Vacio titulo={empleado ? `${nombreCompleto(empleado)} no tiene turnos cerrados en este periodo` : "No hay turnos cerrados en este periodo"} />
             ) : (
               <table className="tabla">
                 <thead>
