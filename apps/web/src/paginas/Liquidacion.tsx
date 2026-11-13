@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
+import { SelectorEmpleado } from "../componentes/SelectorEmpleado";
 import { Cargando, Encabezado, MensajeError, Vacio } from "../componentes/ui";
 import { api, descargar } from "../lib/api";
 import { fechaISOCorta, horasDecimales, hoyLocal, nombreCompleto, pesos } from "../lib/formato";
@@ -27,10 +28,10 @@ function periodos() {
 export default function Liquidacion() {
   const ps = periodos();
   const [rango, setRango] = useState({ desde: ps[2]!.desde, hasta: ps[2]!.hasta });
-  const [empleadoId, setEmpleadoId] = useState("");
+  const [empleadoId, setEmpleadoId] = useState<number | null>(null);
   // Incluye inactivos: alguien dado de baja puede tener turnos por liquidar en el periodo.
   const emps = useQuery({ queryKey: ["empleados", "todos"], queryFn: () => api<{ datos: Empleado[] }>("/empleados?estado=todos") });
-  const empleado = emps.data?.datos.find((e) => String(e.id) === empleadoId);
+  const empleado = emps.data?.datos.find((e) => e.id === empleadoId);
   const consulta = `/reportes/liquidacion?desde=${rango.desde}&hasta=${rango.hasta}${empleadoId ? `&empleadoId=${empleadoId}` : ""}`;
   const q = useQuery({
     queryKey: ["liquidacion", rango, empleadoId],
@@ -79,15 +80,7 @@ export default function Liquidacion() {
         </div>
         <div>
           <label className="etiqueta" htmlFor="l-emp">Empleado</label>
-          <select id="l-emp" className="campo w-64" value={empleadoId} onChange={(e) => setEmpleadoId(e.target.value)}>
-            <option value="">Todos los empleados</option>
-            {emps.data?.datos.map((e) => (
-              <option key={e.id} value={e.id}>
-                {nombreCompleto(e)} · {e.identificacion}
-                {e.activo ? "" : " (inactivo)"}
-              </option>
-            ))}
-          </select>
+          <SelectorEmpleado id="l-emp" empleados={emps.data?.datos ?? []} valor={empleadoId} onCambiar={setEmpleadoId} cargando={emps.isPending} />
         </div>
       </div>
 
