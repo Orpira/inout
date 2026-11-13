@@ -1,6 +1,7 @@
+import { fechaLocal, horarioLegalPorDefecto, salidaProgramada } from "@inout/core";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { empleados, marcaciones as marcacionesT } from "../db/schema.js";
+import { empleados, horarios, marcaciones as marcacionesT } from "../db/schema.js";
 import { ErrorHttp } from "../errores.js";
 import { zapp, type Rutas } from "../contexto.js";
 
@@ -19,6 +20,8 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
 
   const limite = { rateLimit: { max: 60, timeWindow: "1 minute" } };
   const codigo = z.string().trim().min(1).max(40);
+  /** Lo que eligió el empleado cuando tenía una entrada sin salida. */
+  const tipoMarca = z.enum(["ENTRADA", "SALIDA"]);
 
   r.get(
     "/empleado/:codigo",
@@ -28,9 +31,9 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
 
   r.post(
     "/marcar",
-    { config: limite, schema: { body: z.object({ codigo }) } },
+    { config: limite, schema: { body: z.object({ codigo, tipo: tipoMarca.optional() }) } },
     async (req) => {
-      const r = await marcaciones.marcar(req.body.codigo);
+      const r = await marcaciones.marcar(req.body.codigo, { tipo: req.body.tipo });
       return {
         tipo: r.tipo,
         empleado: r.empleado,
@@ -63,11 +66,22 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
         apellido: empleados.apellido,
         cargo: empleados.cargo,
         abiertaDesde: marcacionesT.entrada,
+        horario: horarios,
       })
       .from(empleados)
       .leftJoin(marcacionesT, and(eq(marcacionesT.empleadoId, empleados.id), eq(marcacionesT.estado, "ABIERTA")))
+      .leftJoin(horarios, eq(horarios.id, empleados.horarioId))
       .where(eq(empleados.activo, true));
-    return { generadoEn: new Date().toISOString(), empleados: filas };
+    return {
+      generadoEn: new Date().toISOString(),
+      // Horas a partir de las cuales el kiosko deja de tratar un turno abierto como vigente.
+      maxHorasTurno: env.MAX_HORAS_TURNO,
+      empleados: filas.map(({ horario, ...e }) => ({
+        ...e,
+        // Con esto el kiosko sabe, sin conexión, desde cuándo puede ofrecer una entrada nueva.
+        salidaProgramada: e.abiertaDesde ? salidaProgramada(horario ?? horarioLegalPorDefecto(fechaLocal(e.abiertaDesde)), e.abiertaDesde) : null,
+      })),
+    };
   });
 
   /** Recibe en lote las marcaciones capturadas sin conexión. */
@@ -85,6 +99,7 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
                 id: z.string().uuid(),
                 codigo,
                 capturadoEn: z.string().datetime({ offset: true }).transform((v) => new Date(v)),
+                tipo: tipoMarca.optional(),
               }),
             )
             .max(500),

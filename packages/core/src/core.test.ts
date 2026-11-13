@@ -10,6 +10,8 @@ import {
   minutosHorarioFijo,
   minutosOrdinariosHorario,
   validarHorario,
+  horarioLegalPorDefecto,
+  salidaProgramada,
   type Horario,
   recargoDominical,
   type Categoria,
@@ -177,6 +179,38 @@ describe("motor de liquidación", () => {
     expect(() =>
       liquidar({ ...base, entrada: desdeLocal("2026-11-05", "10:00"), salida: desdeLocal("2026-11-05", "09:00") }),
     ).toThrow();
+  });
+});
+
+describe("salida programada de un turno sin salida", () => {
+  const dias = (d: (i: number) => object) => Array.from({ length: 7 }, (_, i) => d(i)) as Horario["dias"];
+  const fijo: Horario = {
+    tipo: "FIJO",
+    dias: dias((i) => (i >= 1 && i <= 5 ? { laborable: true, minutos: 480, inicio: "08:00", fin: "17:00" } : { laborable: false, minutos: 0 })),
+    descanso: { tipo: "VENTANA", inicio: "12:00", fin: "13:00" },
+    toleranciaMinutos: 0,
+    requiereAprobacion: false,
+  };
+  const turnos: Horario = {
+    tipo: "TURNOS",
+    dias: dias((i) => ({ laborable: i !== 0, minutos: i === 0 ? 0 : 420 })),
+    descanso: { tipo: "DURACION", minutos: 30, despuesDe: 300 },
+    toleranciaMinutos: 0,
+    requiereAprobacion: false,
+  };
+  // 2026-11-09 es lunes; 2026-11-08, domingo
+  it("horario fijo: la hora de salida del día, aunque haya llegado tarde", () => {
+    expect(salidaProgramada(fijo, desdeLocal("2026-11-09", "07:50"))).toEqual(desdeLocal("2026-11-09", "17:00"));
+    expect(salidaProgramada(fijo, desdeLocal("2026-11-09", "10:30"))).toEqual(desdeLocal("2026-11-09", "17:00"));
+  });
+  it("turnos: entrada más la jornada del día y el descanso", () => {
+    expect(salidaProgramada(turnos, desdeLocal("2026-11-09", "06:00"))).toEqual(desdeLocal("2026-11-09", "13:30"));
+    expect(salidaProgramada(horarioLegalPorDefecto("2026-11-09"), desdeLocal("2026-11-09", "22:00"))).toEqual(desdeLocal("2026-11-10", "05:00"));
+  });
+  it("sin referencia: día no laborable o entrada después de la salida del horario", () => {
+    expect(salidaProgramada(fijo, desdeLocal("2026-11-08", "08:00"))).toBeNull();
+    expect(salidaProgramada(turnos, desdeLocal("2026-11-08", "08:00"))).toBeNull();
+    expect(salidaProgramada(fijo, desdeLocal("2026-11-09", "18:00"))).toBeNull();
   });
 });
 

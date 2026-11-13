@@ -61,7 +61,7 @@ if (process.argv.includes("--demo")) {
   ];
   const insertados = await db.insert(empleados).values(demo).onConflictDoNothing().returning();
   if (insertados.length) {
-    const svc = new ServicioMarcaciones(db, new ServicioCalendario(), { MAX_HORAS_TURNO: 16, ANTIREBOTE_SEGUNDOS: 60, MAX_HORAS_OFFLINE: 168 });
+    const svc = new ServicioMarcaciones(db, new ServicioCalendario(), { MAX_HORAS_TURNO: 24, ANTIREBOTE_SEGUNDOS: 60, MAX_HORAS_OFFLINE: 168 });
     const hoy = fechaLocal(new Date());
     // Turnos rotativos de bodega (06-13:30, 13:30-21, 21-04:30) y horario fijo administrativo.
     const turnosBodega: Array<[string, string, number]> = [

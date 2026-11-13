@@ -1,0 +1,1 @@
+ALTER TABLE "marcaciones" ADD COLUMN "salida_automatica" boolean DEFAULT false NOT NULL;

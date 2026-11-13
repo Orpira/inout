@@ -12,6 +12,8 @@ export interface MarcaPendiente {
   id: string;
   codigo: string;
   capturadoEn: string;
+  /** Lo que eligió el empleado cuando tenía una entrada sin salida. */
+  tipo?: "ENTRADA" | "SALIDA";
 }
 
 export interface EmpleadoDirectorio {
@@ -20,10 +22,13 @@ export interface EmpleadoDirectorio {
   apellido: string;
   cargo: string | null;
   abiertaDesde: string | null;
+  /** Hora con la que el sistema cerraría el turno abierto (null = desconocida o sin referencia). */
+  salidaProgramada?: string | null;
 }
 
 interface Directorio {
   generadoEn: string | null;
+  maxHorasTurno?: number;
   deshabilitado?: boolean;
   empleados: Record<string, EmpleadoDirectorio>;
 }
@@ -85,10 +90,10 @@ export function cola(): MarcaPendiente[] {
 }
 
 /** Guarda una marcación en la tablet y actualiza el estado local del empleado. */
-export function encolar(codigo: string, momento = new Date()): { marca: MarcaPendiente; tipo: "ENTRADA" | "SALIDA" | null } {
-  const marca = { id: uuid(), codigo, capturadoEn: momento.toISOString() };
+export function encolar(codigo: string, momento = new Date(), elegido?: "ENTRADA" | "SALIDA"): { marca: MarcaPendiente; tipo: "ENTRADA" | "SALIDA" | null } {
+  const marca: MarcaPendiente = { id: uuid(), codigo, capturadoEn: momento.toISOString(), ...(elegido ? { tipo: elegido } : {}) };
   escribir(K_COLA, [...cola(), marca]);
-  const tipo = alternarEstadoLocal(codigo, momento);
+  const tipo = alternarEstadoLocal(codigo, momento, elegido);
   return { marca, tipo };
 }
 
@@ -140,12 +145,12 @@ export const directorioDisponible = () => {
 
 export async function actualizarDirectorio(): Promise<void> {
   try {
-    const r = await api<{ generadoEn: string; empleados: EmpleadoDirectorio[] }>("/kiosko/directorio", { timeoutMs: 15000 });
+    const r = await api<{ generadoEn: string; maxHorasTurno?: number; empleados: EmpleadoDirectorio[] }>("/kiosko/directorio", { timeoutMs: 15000 });
     const pendientes = cola();
     const empleados = Object.fromEntries(r.empleados.map((e) => [e.identificacion, e]));
-    escribir(K_DIR, { generadoEn: r.generadoEn, empleados });
+    escribir(K_DIR, { generadoEn: r.generadoEn, maxHorasTurno: r.maxHorasTurno, empleados });
     // Reaplica sobre el directorio las marcas que aún no llegaron al servidor.
-    for (const m of pendientes) alternarEstadoLocal(m.codigo, new Date(m.capturadoEn));
+    for (const m of pendientes) alternarEstadoLocal(m.codigo, new Date(m.capturadoEn), m.tipo);
   } catch (e) {
     if (e instanceof ErrorApi && e.codigo === "DIRECTORIO_DESHABILITADO") {
       escribir(K_DIR, { generadoEn: null, deshabilitado: true, empleados: {} });
@@ -157,12 +162,17 @@ export function buscarEnDirectorio(codigo: string): EmpleadoDirectorio | null {
   return directorio().empleados[codigo] ?? null;
 }
 
-function alternarEstadoLocal(codigo: string, momento: Date): "ENTRADA" | "SALIDA" | null {
+/** Horas tras las cuales un turno abierto se da por olvidado (lo informa el servidor; 24 por defecto). */
+export const maxHorasTurno = () => directorio().maxHorasTurno ?? 24;
+
+function alternarEstadoLocal(codigo: string, momento: Date, elegido?: "ENTRADA" | "SALIDA"): "ENTRADA" | "SALIDA" | null {
   const d = directorio();
   const e = d.empleados[codigo];
   if (!e) return null;
-  const tipo = e.abiertaDesde ? "SALIDA" : "ENTRADA";
+  const vencida = !!e.abiertaDesde && momento.getTime() - new Date(e.abiertaDesde).getTime() > (d.maxHorasTurno ?? 24) * 3_600_000;
+  const tipo = elegido ?? (e.abiertaDesde && !vencida ? "SALIDA" : "ENTRADA");
   e.abiertaDesde = tipo === "ENTRADA" ? momento.toISOString() : null;
+  e.salidaProgramada = null;
   escribir(K_DIR, d);
   return tipo;
 }
@@ -173,5 +183,6 @@ export function registrarEstadoLocal(codigo: string, tipo: "ENTRADA" | "SALIDA",
   const e = d.empleados[codigo];
   if (!e) return;
   e.abiertaDesde = tipo === "ENTRADA" ? momento : null;
+  e.salidaProgramada = null;
   escribir(K_DIR, d);
 }

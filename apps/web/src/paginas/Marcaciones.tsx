@@ -21,7 +21,8 @@ export default function Marcaciones() {
   const filtros = {
     desde: sp.get("desde") ?? sumarDias(hoyLocal(), -14),
     hasta: sp.get("hasta") ?? hoyLocal(),
-    estado: (sp.get("estado") ?? "") as EstadoMarcacion | "",
+    // "AUTO" no es un estado: filtra los turnos que el sistema cerró con la hora del horario.
+    estado: (sp.get("estado") ?? "") as EstadoMarcacion | "AUTO" | "",
     q: sp.get("q") ?? "",
     extras: (sp.get("extras") ?? "") as "" | "CON" | "PENDIENTE" | "APROBADAS" | "RECHAZADAS",
     pagina: Number(sp.get("pagina") ?? 1),
@@ -37,7 +38,8 @@ export default function Marcaciones() {
   };
 
   const qs = new URLSearchParams({ desde: filtros.desde, hasta: filtros.hasta, pagina: String(filtros.pagina), porPagina: "25" });
-  if (filtros.estado) qs.set("estado", filtros.estado);
+  if (filtros.estado === "AUTO") qs.set("salidaAutomatica", "true");
+  else if (filtros.estado) qs.set("estado", filtros.estado);
   if (filtros.q) qs.set("q", filtros.q);
   if (filtros.extras === "CON") qs.set("soloExtras", "true");
   else if (filtros.extras) qs.set("estadoExtras", filtros.extras);
@@ -96,6 +98,7 @@ export default function Marcaciones() {
             <option value="ABIERTA">En turno</option>
             <option value="CERRADA">Cerradas</option>
             <option value="REVISION">Por revisar</option>
+            <option value="AUTO">Salida automática</option>
             <option value="ANULADA">Anuladas</option>
           </select>
         </div>
@@ -194,7 +197,14 @@ export default function Marcaciones() {
                     </td>
                     <td className="whitespace-nowrap">{fechaCorta(m.entrada)}</td>
                     <td className="tabular-nums">{hora(m.entrada)}</td>
-                    <td className="tabular-nums">{m.salida ? hora(m.salida) : <span className="text-tinta-tenue">—</span>}</td>
+                    <td className="whitespace-nowrap tabular-nums">
+                      {m.salida ? hora(m.salida) : <span className="text-tinta-tenue">—</span>}
+                      {m.salidaAutomatica && (
+                        <span className="ml-1.5 rounded bg-extra-claro px-1.5 py-0.5 text-[0.72rem] font-semibold text-extra-oscuro" title="El empleado no marcó la salida: el sistema la puso con la hora de su horario">
+                          Auto
+                        </span>
+                      )}
+                    </td>
                     <td>
                       <CintaJornada entrada={m.entrada} salida={m.salida} minutosExtra={m.minutosExtraCalculados ?? m.minutosExtra} variante="compacta" />
                     </td>
@@ -254,9 +264,15 @@ function DetalleMarcacion({ id }: { id: number }) {
           <span>{fechaCorta(m.entrada)}</span>
           <span className="ml-3">{ORIGEN[m.origen]}</span>
         </p>
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <EstadoChip estado={m.estado} />
+          {m.salidaAutomatica && <span className="inline-flex rounded bg-extra-claro px-2 py-0.5 text-[0.8rem] font-semibold text-extra-oscuro">Salida automática</span>}
         </div>
+        {m.salidaAutomatica && (
+          <p className="mt-2 text-[0.9rem] text-extra-oscuro">
+            El empleado no marcó la salida: el sistema la puso con la hora de su horario. Si no es correcta, corrígela.
+          </p>
+        )}
       </div>
 
       <div>
