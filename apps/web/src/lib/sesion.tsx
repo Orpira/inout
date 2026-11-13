@@ -35,8 +35,8 @@ export function ProveedorSesion({ children }: { children: ReactNode }) {
     },
     salir: async () => {
       await api("/auth/logout", { method: "POST" }).catch(() => {});
-      qc.clear();
       qc.setQueryData(["me"], null);
+      qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
     },
   };
   return <Ctx.Provider value={valor}>{children}</Ctx.Provider>;
