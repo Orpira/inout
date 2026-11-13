@@ -41,7 +41,7 @@ function periodosRapidos(ultimoLiquidado?: string): Periodo[] {
 export default function Liquidacion() {
   const { usuario } = useSesion();
   const esAdmin = usuario?.rol === "ADMIN";
-  const cierres = useQuery({ queryKey: ["periodos"], queryFn: () => api<{ datos: PeriodoLiquidado[] }>("/periodos") });
+  const cierres = useQuery({ queryKey: ["periodos"], queryFn: () => api<{ datos: PeriodoLiquidado[] }>("/periodos"), retry: false });
   const historial = cierres.data?.datos ?? [];
   const ultimoLiquidado = historial.filter((p) => p.vigente).reduce<string | undefined>((m, p) => (!m || p.hasta > m ? p.hasta : m), undefined);
   const ps = periodosRapidos(ultimoLiquidado);
@@ -56,7 +56,17 @@ export default function Liquidacion() {
   const consulta = `/reportes/liquidacion?desde=${rango.desde}&hasta=${rango.hasta}${empleadoId ? `&empleadoId=${empleadoId}` : ""}`;
   const q = useQuery({
     queryKey: ["liquidacion", rango, empleadoId],
-    queryFn: () => api<ReporteLiquidacion>(consulta),
+    queryFn: async () => {
+      const r = await api<ReporteLiquidacion>(consulta);
+      // Una API anterior al cierre de periodos no envía estos campos: la pantalla sigue funcionando sin ellos.
+      return {
+        ...r,
+        apiDesactualizada: !r.cierre,
+        cierre: r.cierre ?? { estado: "ABIERTO" as const, periodos: [] },
+        pendientes: r.pendientes ?? { porRevisar: 0, enTurno: 0, extrasPorAprobar: 0, offlineSinResolver: 0, total: 0 },
+        datos: r.datos.map((f) => ({ ...f, turnosPorRevisar: f.turnosPorRevisar ?? 0, turnosEnCurso: f.turnosEnCurso ?? 0 })),
+      };
+    },
   });
   const estado = q.data?.cierre.estado;
   // Por qué no se puede cerrar todavía (null = se puede).
@@ -64,7 +74,9 @@ export default function Liquidacion() {
     ? "Cargando…"
     : empleadoId
       ? "Quita el filtro de empleado: el periodo se cierra para todos."
-      : rango.hasta >= hoyLocal()
+      : q.data.apiDesactualizada
+        ? "El servidor aún no tiene esta función: hay que actualizar la API."
+        : rango.hasta >= hoyLocal()
         ? "El periodo aún no termina: la fecha final debe ser anterior a hoy."
         : q.data.pendientes.total
           ? "Hay registros por resolver en el periodo."
@@ -130,6 +142,11 @@ export default function Liquidacion() {
         <MensajeError error={q.error} />
       ) : (
         <>
+          {q.data.apiDesactualizada && (
+            <div role="alert" className="mb-4 rounded-md border border-alerta/30 bg-alerta-claro px-4 py-3 text-[0.93rem] text-alerta">
+              El servidor (API) es anterior a esta versión de la web: el aviso de turnos por revisar y el cierre de periodos no están disponibles hasta actualizarlo.
+            </div>
+          )}
           <AvisoCierre
             cierre={q.data.cierre}
             periodos={historial}
