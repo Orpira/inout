@@ -282,7 +282,7 @@ async function migrarDatos(ejecutar: boolean) {
     });
 
     const svc = new ServicioMarcaciones(db, new ServicioCalendario(), { MAX_HORAS_TURNO, ANTIREBOTE_SEGUNDOS: 60, MAX_HORAS_OFFLINE: 168 });
-    const dias = await svc.recalcularRango("2000-01-01", "2100-12-31");
+    const { recalculados: dias } = await svc.recalcularRango("2000-01-01", "2100-12-31");
     console.log(`\n✔ Migración completada. Días-empleado liquidados: ${dias}.`);
     if (!admins) console.log("  ADMIN: el usuario con menor id; el resto quedó como SUPERVISOR.");
     console.log("  Siguiente paso: asigna un horario a cada empleado y recalcula desde Festivos y normas.");

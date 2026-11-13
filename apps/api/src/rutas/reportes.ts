@@ -2,8 +2,9 @@ import { CATEGORIAS, ETIQUETAS, desdeLocal, formatearMinutos, lunesDeSemana, MAX
 import { and, asc, eq, gte, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { empleados, liquidacionLineas, marcaciones } from "../db/schema.js";
-import { solicitudInvalida } from "../errores.js";
+import { conflicto, solicitudInvalida } from "../errores.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
+import { estadoDelRango, pendientesDelRango, periodosVigentes } from "../servicios/periodos.js";
 import { fechaISO } from "./marcaciones.js";
 
 const rango = z.object({
@@ -23,6 +24,10 @@ interface FilaReporte {
   minutosTotales: number;
   minutosExtra: number;
   minutosExtraPendientes: number;
+  /** Turnos del periodo sin resolver (sin salida o por corregir): no están incluidos en los valores. */
+  turnosPorRevisar: number;
+  /** Turnos del periodo que siguen abiertos. */
+  turnosEnCurso: number;
   valorTotal: number;
   categorias: Partial<Record<Categoria, { minutos: number; valor: number }>>;
   alertas: string[];
@@ -51,6 +56,12 @@ export const rutasReportes: Rutas = (app, { db }) => {
       empleadoId ? eq(marcaciones.empleadoId, empleadoId) : undefined,
     );
 
+    const [liquidados, pendientes] = await Promise.all([periodosVigentes(db, desde, hasta), pendientesDelRango(db, desde, hasta, empleadoId)]);
+    const estado = estadoDelRango(desde, hasta, liquidados);
+    if (formato === "csv" && estado === "MIXTO") {
+      throw conflicto("El rango mezcla días ya liquidados con días sin liquidar. Ajusta las fechas para no pagar dos veces.", "PERIODO_MIXTO");
+    }
+
     const [porCategoria, porEmpleado, porSemana] = await Promise.all([
       db
         .select({
@@ -68,6 +79,7 @@ export const rutasReportes: Rutas = (app, { db }) => {
           empleadoId: empleados.id,
           identificacion: empleados.identificacion,
           nombre: sql<string>`${empleados.nombre} || ' ' || ${empleados.apellido}`,
+          orden: sql<string>`lower(${empleados.apellido} || ' ' || ${empleados.nombre})`,
           cargo: empleados.cargo,
           salario: empleados.salario,
           turnos: sql<number>`count(*)::int`,
@@ -92,9 +104,36 @@ export const rutasReportes: Rutas = (app, { db }) => {
         .groupBy(marcaciones.empleadoId, sql`2`),
     ]);
 
-    const filas = new Map<number, FilaReporte>(
-      porEmpleado.map((e) => [e.empleadoId, { ...e, categorias: {}, alertas: [] }]),
+    const filas = new Map<number, FilaReporte & { orden: string }>(
+      porEmpleado.map((e) => [e.empleadoId, { ...e, turnosPorRevisar: 0, turnosEnCurso: 0, categorias: {}, alertas: [] }]),
     );
+    // Quien solo tiene turnos sin resolver también aparece (en ceros), para que nómina no lo pase por alto.
+    for (const p of pendientes.porEmpleado) {
+      if (!p.porRevisar && !p.enTurno) continue;
+      const f =
+        filas.get(p.empleadoId) ??
+        filas
+          .set(p.empleadoId, {
+            empleadoId: p.empleadoId,
+            identificacion: p.identificacion,
+            nombre: `${p.nombre} ${p.apellido}`,
+            orden: `${p.apellido} ${p.nombre}`.toLowerCase(),
+            cargo: p.cargo,
+            salario: p.salario,
+            turnos: 0,
+            minutosTotales: 0,
+            minutosExtra: 0,
+            minutosExtraPendientes: 0,
+            turnosPorRevisar: 0,
+            turnosEnCurso: 0,
+            valorTotal: 0,
+            categorias: {},
+            alertas: [],
+          })
+          .get(p.empleadoId)!;
+      f.turnosPorRevisar = p.porRevisar;
+      f.turnosEnCurso = p.enTurno;
+    }
     for (const c of porCategoria) {
       const f = filas.get(c.empleadoId);
       if (f) f.categorias[c.categoria] = { minutos: c.minutos, valor: Math.round(c.valor * 100) / 100 };
@@ -111,7 +150,12 @@ export const rutasReportes: Rutas = (app, { db }) => {
       filas.get(Number(emp))?.alertas.push(`Semana del ${lunes}: ${formatearMinutos(min)} h extra (máx. 12 h).`);
     }
 
-    const datos = [...filas.values()];
+    const datos: FilaReporte[] = [...filas.values()].sort((a, b) => a.orden.localeCompare(b.orden, "es")).map(({ orden: _orden, ...f }) => f);
+    const cierre = {
+      estado,
+      periodos: liquidados.map((p) => ({ id: p.id, desde: p.desde, hasta: p.hasta, cerradoEn: p.cerradoEn, nota: p.nota })),
+    };
+    const { porEmpleado: _porEmpleado, ...resumenPendientes } = pendientes;
     const totales = {
       empleados: datos.length,
       turnos: datos.reduce((s, f) => s + f.turnos, 0),
@@ -140,10 +184,13 @@ export const rutasReportes: Rutas = (app, { db }) => {
         "Horas trabajadas",
         "Horas extra liquidadas",
         "Horas extra pendientes de aprobación",
+        "Turnos por revisar (no incluidos)",
         ...CATEGORIAS.flatMap((c) => [`${ETIQUETAS[c].corta} horas`, `${ETIQUETAS[c].corta} valor`]),
         "Total a pagar (recargos y extras)",
         "Alertas",
+        "Estado del periodo",
       ];
+      const textoEstado = estado === "LIQUIDADO" ? "Liquidado" : "Sin cerrar";
       const cuerpo = datos.map((f) => [
         f.identificacion,
         f.nombre,
@@ -153,9 +200,11 @@ export const rutasReportes: Rutas = (app, { db }) => {
         horas(f.minutosTotales),
         horas(f.minutosExtra),
         horas(f.minutosExtraPendientes),
+        f.turnosPorRevisar + f.turnosEnCurso,
         ...CATEGORIAS.flatMap((c) => [horas(f.categorias[c]?.minutos ?? 0), pesos(f.categorias[c]?.valor ?? 0)]),
         pesos(f.valorTotal),
         f.alertas.join(" | "),
+        textoEstado,
       ]);
       // Con filtro de empleado, el archivo lleva su identificación para no confundirlo con el general.
       const sufijo = empleadoId && datos[0] ? `_${datos[0].identificacion.replace(/[^\w-]/g, "")}` : "";
@@ -164,7 +213,7 @@ export const rutasReportes: Rutas = (app, { db }) => {
         .header("Content-Disposition", `attachment; filename="liquidacion${sufijo}_${desde}_${hasta}.csv"`);
       return aCsv([encabezado, ...cuerpo]);
     }
-    return { desde, hasta, datos, totales };
+    return { desde, hasta, datos, totales, pendientes: resumenPendientes, cierre };
   });
 
   r.get("/marcaciones", { onRequest: requiereSesion(), schema: { querystring: rango.omit({ formato: true }) } }, async (req, reply) => {

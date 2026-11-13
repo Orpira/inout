@@ -6,6 +6,7 @@ import { ErrorHttp } from "./errores.js";
 import type { ServicioCalendario } from "./servicios/calendario.js";
 import type { ServicioMarcaciones } from "./servicios/marcaciones.js";
 import type { ServicioOffline } from "./servicios/offline.js";
+import type { ServicioPeriodos } from "./servicios/periodos.js";
 
 export type Rol = "ADMIN" | "SUPERVISOR";
 
@@ -28,6 +29,7 @@ export interface Contexto {
   calendario: ServicioCalendario;
   marcaciones: ServicioMarcaciones;
   offline: ServicioOffline;
+  periodos: ServicioPeriodos;
 }
 
 export type Rutas = (app: FastifyInstance, ctx: Contexto) => Promise<void> | void;

@@ -212,7 +212,55 @@ export const marcasOffline = pgTable(
   (t) => [index("marcas_offline_estado_idx").on(t.estado, t.capturadoEn)],
 );
 
+export interface DetallePeriodo {
+  empleadoId: number;
+  identificacion: string;
+  nombre: string;
+  turnos: number;
+  minutosTotales: number;
+  minutosExtra: number;
+  valorTotal: number;
+}
+
+export interface ResumenPeriodo {
+  empleados: number;
+  turnos: number;
+  minutosTotales: number;
+  minutosExtra: number;
+  valorTotal: number;
+}
+
+/**
+ * Periodos ya liquidados. Mientras un cierre está vigente (sin reabrir), las marcaciones
+ * cuya entrada cae entre `desde` y `hasta` son de solo consulta.
+ * Reabrir no borra la fila: queda como historial.
+ * La migración añade una restricción de exclusión para que dos cierres vigentes no se solapen.
+ */
+export const periodosLiquidados = pgTable(
+  "periodos_liquidados",
+  {
+    id: serial("id").primaryKey(),
+    desde: date("desde").notNull(),
+    hasta: date("hasta").notNull(),
+    nota: text("nota"),
+    /** Totales al momento del cierre. */
+    resumen: jsonb("resumen").$type<ResumenPeriodo>().notNull(),
+    /** Lo liquidado a cada empleado al momento del cierre: permite comparar si se vuelve a liquidar. */
+    detalle: jsonb("detalle").$type<DetallePeriodo[]>().notNull().default([]),
+    cerradoPor: integer("cerrado_por").references(() => usuarios.id, { onDelete: "set null" }),
+    cerradoEn: timestamp("cerrado_en", { withTimezone: true }).notNull().defaultNow(),
+    reabiertoPor: integer("reabierto_por").references(() => usuarios.id, { onDelete: "set null" }),
+    reabiertoEn: timestamp("reabierto_en", { withTimezone: true }),
+    motivoReapertura: text("motivo_reapertura"),
+  },
+  (t) => [
+    index("periodos_liquidados_rango_idx").on(t.desde, t.hasta),
+    check("periodos_liquidados_rango_ck", sql`${t.hasta} >= ${t.desde}`),
+  ],
+);
+
 export type Usuario = typeof usuarios.$inferSelect;
+export type PeriodoLiquidado = typeof periodosLiquidados.$inferSelect;
 export type Empleado = typeof empleados.$inferSelect;
 export type Marcacion = typeof marcaciones.$inferSelect;
 export type HorarioFila = typeof horarios.$inferSelect;

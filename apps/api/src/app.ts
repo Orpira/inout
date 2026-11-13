@@ -19,17 +19,19 @@ import { rutasEmpleados } from "./rutas/empleados.js";
 import { rutasHorarios } from "./rutas/horarios.js";
 import { rutasKiosko } from "./rutas/kiosko.js";
 import { rutasMarcaciones } from "./rutas/marcaciones.js";
+import { rutasPeriodos } from "./rutas/periodos.js";
 import { rutasReportes } from "./rutas/reportes.js";
 import { rutasUsuarios } from "./rutas/usuarios.js";
 import { ServicioCalendario } from "./servicios/calendario.js";
 import { ServicioMarcaciones } from "./servicios/marcaciones.js";
 import { ServicioOffline } from "./servicios/offline.js";
+import { ServicioPeriodos } from "./servicios/periodos.js";
 
 export async function construirApp(env: Env, opciones: { db?: Db; logger?: boolean } = {}) {
   const { db, cliente } = opciones.db ? { db: opciones.db, cliente: null } : crearDb(env.DATABASE_URL);
   const calendario = new ServicioCalendario();
   const svcMarcaciones = new ServicioMarcaciones(db, calendario, env);
-  const ctx: Contexto = { db, env, calendario, marcaciones: svcMarcaciones, offline: new ServicioOffline(db, svcMarcaciones) };
+  const ctx: Contexto = { db, env, calendario, marcaciones: svcMarcaciones, offline: new ServicioOffline(db, svcMarcaciones), periodos: new ServicioPeriodos(db) };
 
   const app = Fastify({
     logger: opciones.logger ?? env.NODE_ENV !== "test",
@@ -100,6 +102,7 @@ export async function construirApp(env: Env, opciones: { db?: Db; logger?: boole
     ["/api/horarios", rutasHorarios],
     ["/api/marcaciones", rutasMarcaciones],
     ["/api/reportes", rutasReportes],
+    ["/api/periodos", rutasPeriodos],
     ["/api/dashboard", rutasDashboard],
     ["/api/config", rutasConfig],
     ["/api/usuarios", rutasUsuarios],
