@@ -50,6 +50,13 @@
       "when": 1795013656339,
       "tag": "0006_rol_consulta",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795015717812,
+      "tag": "0007_reingreso",
+      "breakpoints": true
     }
   ]
 }

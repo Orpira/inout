@@ -431,6 +431,64 @@ describe("horarios y aprobación de horas extra", () => {
   });
 });
 
+describe("reingreso en el mismo día", () => {
+  it("volver a marcar tras cerrar el turno del día es una novedad que aprueba el supervisor", async () => {
+    await crearEmpleado({ identificacion: "3001" });
+    const marcar = () => app.inject({ method: "POST", url: "/api/kiosko/marcar", payload: { codigo: "3001" } });
+    expect((await marcar()).json().tipo).toBe("ENTRADA");
+    expect((await marcar()).json().tipo).toBe("SALIDA");
+    const re = (await marcar()).json();
+    expect(re.tipo).toBe("ENTRADA");
+    expect(re.aviso).toMatch(/supervisor debe aprobarla/);
+    const salida = (await marcar()).json();
+    expect(salida.tipo).toBe("SALIDA");
+    expect(salida.aviso).toMatch(/pendiente de aprobación/);
+    // Queda en revisión y no se liquida hasta aprobarlo.
+    const detalle = (await api("GET", `/api/marcaciones/${salida.marcacion.id}`)).json();
+    expect(detalle.estado).toBe("REVISION");
+    expect(detalle.reingreso).toBe(true);
+    expect(detalle.lineas).toHaveLength(0);
+    expect((await api("POST", `/api/marcaciones/${salida.marcacion.id}/aprobar-reingreso`, { motivo: "x" })).statusCode).toBe(400);
+    const ok = await api("POST", `/api/marcaciones/${salida.marcacion.id}/aprobar-reingreso`, { motivo: "Apoyo en el despacho" }, cookieSup);
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().estado).toBe("CERRADA");
+    const historial = (await api("GET", `/api/marcaciones/${salida.marcacion.id}`)).json().historial as { accion: string }[];
+    expect(historial.map((h) => h.accion)).toEqual(expect.arrayContaining(["REINGRESO", "ENVIAR_REVISION", "APROBAR_REINGRESO"]));
+  });
+});
+
+describe("reabrir un turno cerrado por error", () => {
+  it("quita la salida, deja el turno abierto y registra quién y por qué", async () => {
+    await crearEmpleado({ identificacion: "3002" });
+    const marcar = () => app.inject({ method: "POST", url: "/api/kiosko/marcar", payload: { codigo: "3002" } });
+    await marcar();
+    const cerrada = (await marcar()).json().marcacion;
+    const det = (await api("GET", `/api/marcaciones/${cerrada.id}`)).json();
+    expect(det.reabrir.posible).toBe(true);
+    expect((await api("POST", `/api/marcaciones/${cerrada.id}/reabrir`, { motivo: "x" }, cookieSup)).statusCode).toBe(400);
+    const r = await api("POST", `/api/marcaciones/${cerrada.id}/reabrir`, { motivo: "Marcó la salida por error" }, cookieSup);
+    expect(r.statusCode).toBe(200);
+    expect(r.json().estado).toBe("ABIERTA");
+    expect(r.json().salida).toBeNull();
+    const tras = (await api("GET", `/api/marcaciones/${cerrada.id}`)).json();
+    const evento = tras.historial.find((h: { accion: string }) => h.accion === "REABRIR");
+    expect(evento.motivo).toBe("Marcó la salida por error");
+    expect(evento.usuario).toBe("Sup");
+    expect(evento.antes.salida).not.toBeNull();
+    expect(tras.lineas).toHaveLength(0);
+    // La siguiente marcación del kiosko es la salida real del mismo turno (no un reingreso).
+    const salida = (await marcar()).json();
+    expect(salida.tipo).toBe("SALIDA");
+    expect(salida.marcacion.id).toBe(cerrada.id);
+    expect(salida.aviso).toBeNull();
+    // Con un registro posterior ya no se puede reabrir el anterior.
+    await marcar();
+    const otra = (await api("GET", `/api/marcaciones/${cerrada.id}`)).json();
+    expect(otra.reabrir.posible).toBe(false);
+    expect((await api("POST", `/api/marcaciones/${cerrada.id}/reabrir`, { motivo: "Marcó la salida por error" })).statusCode).toBe(409);
+  });
+});
+
 describe("kiosko sin conexión", () => {
   const uuid = () => crypto.randomUUID();
   const sincronizar = (marcas: { id: string; codigo: string; capturadoEn: string }[], enviadoEn = new Date()) =>

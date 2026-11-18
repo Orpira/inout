@@ -394,7 +394,8 @@ export default function Kiosko() {
                 <p className="mt-3 text-xl font-semibold">
                   {paso.r.empleado.nombre} {paso.r.empleado.apellido}
                 </p>
-                {paso.r.tipo === "SALIDA" && (
+                {/* Un reingreso queda en revisión sin liquidar: no hay horas que mostrar todavía. */}
+                {paso.r.tipo === "SALIDA" && paso.r.marcacion.minutosTotales != null && (
                   <p className="mt-4 text-lg">
                     Trabajaste <strong>{duracion((paso.r.marcacion.minutosTotales ?? 0) + Math.max(0, (paso.r.marcacion.minutosExtraCalculados ?? 0) - (paso.r.marcacion.minutosExtra ?? 0)))}</strong>
                     {extrasTexto(paso.r) && (

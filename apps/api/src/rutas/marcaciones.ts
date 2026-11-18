@@ -19,6 +19,7 @@ export const columnasMarcacion = {
   origen: marcaciones.origen,
   observacion: marcaciones.observacion,
   salidaAutomatica: marcaciones.salidaAutomatica,
+  reingreso: marcaciones.reingreso,
   minutosTotales: marcaciones.minutosTotales,
   minutosExtra: marcaciones.minutosExtra,
   minutosExtraCalculados: marcaciones.minutosExtraCalculados,
@@ -175,7 +176,9 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
         )
         .orderBy(desc(auditoria.creadoEn)),
     ]);
-    return { ...m, lineas, historial };
+    const [completa] = await db.select().from(marcaciones).where(eq(marcaciones.id, m.id));
+    const impedimento = completa!.estado === "CERRADA" ? await ctx.marcaciones.impedimentoReabrir(db, completa!) : "Solo se puede reabrir un turno cerrado.";
+    return { ...m, lineas, historial, reabrir: { posible: impedimento === null, impedimento } };
   });
 
   r.post(
@@ -226,6 +229,18 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
     "/:id/anular",
     { onRequest: sesion, schema: { params: id, body: z.object({ motivo }) } },
     async (req) => ctx.marcaciones.anular(req.user.id, req.params.id, req.body.motivo),
+  );
+
+  r.post(
+    "/:id/reabrir",
+    { onRequest: sesion, schema: { params: id, body: z.object({ motivo }) } },
+    async (req) => ctx.marcaciones.reabrir(req.user.id, req.params.id, req.body.motivo),
+  );
+
+  r.post(
+    "/:id/aprobar-reingreso",
+    { onRequest: sesion, schema: { params: id, body: z.object({ motivo }) } },
+    async (req) => ctx.marcaciones.aprobarReingreso(req.user.id, req.params.id, req.body.motivo),
   );
 
   r.post(

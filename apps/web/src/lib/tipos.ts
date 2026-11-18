@@ -68,6 +68,8 @@ export interface Marcacion {
   observacion: string | null;
   /** La salida la puso el sistema con la hora del horario porque el empleado no la marcó. */
   salidaAutomatica?: boolean;
+  /** Entrada marcada después de cerrar el turno del día: necesita la aprobación de un supervisor. */
+  reingreso?: boolean;
   minutosTotales: number | null;
   minutosExtra: number | null;
   minutosExtraCalculados: number | null;
@@ -111,6 +113,8 @@ export interface EventoAuditoria {
 export interface MarcacionDetalle extends Marcacion {
   lineas: LineaLiquidacion[];
   historial: EventoAuditoria[];
+  /** Si el turno cerrado se puede reabrir y, si no, por qué. */
+  reabrir?: { posible: boolean; impedimento: string | null };
 }
 
 export interface Pagina<T> {

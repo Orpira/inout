@@ -324,6 +324,11 @@ export default function Marcaciones() {
                     <td className="tabular-nums">{hora(m.entrada)}</td>
                     <td className="whitespace-nowrap tabular-nums">
                       {m.salida ? hora(m.salida) : <span className="text-tinta-tenue">—</span>}
+                      {m.reingreso && (
+                        <span className="ml-1.5 rounded bg-alerta-claro px-1.5 py-0.5 text-[0.72rem] font-semibold text-alerta" title="Volvió a marcar después de cerrar el turno del día: lo aprueba un supervisor">
+                          Reingreso
+                        </span>
+                      )}
                       {m.salidaAutomatica && (
                         <span className="ml-1.5 rounded bg-extra-claro px-1.5 py-0.5 text-[0.72rem] font-semibold text-extra-oscuro" title="El empleado no marcó la salida: el sistema la puso con la hora de su horario">
                           Auto
@@ -391,7 +396,7 @@ function DetalleMarcacion({ id }: { id: number }) {
   const qc = useQueryClient();
   const aviso = useAviso();
   const q = useQuery({ queryKey: ["marcacion", id], queryFn: () => api<MarcacionDetalle>(`/marcaciones/${id}`) });
-  const [modo, setModo] = useState<"ver" | "editar" | "anular">("ver");
+  const [modo, setModo] = useState<"ver" | "editar" | "anular" | "reabrir">("ver");
 
   const refrescar = () => {
     void qc.invalidateQueries({ queryKey: ["marcaciones"] });
@@ -414,6 +419,7 @@ function DetalleMarcacion({ id }: { id: number }) {
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <EstadoChip estado={m.estado} />
           {m.salidaAutomatica && <span className="inline-flex rounded bg-extra-claro px-2 py-0.5 text-[0.8rem] font-semibold text-extra-oscuro">Salida automática</span>}
+          {m.reingreso && <span className="inline-flex rounded bg-alerta-claro px-2 py-0.5 text-[0.8rem] font-semibold text-alerta">Reingreso</span>}
         </div>
         {m.salidaAutomatica && (
           <p className="mt-2 text-[0.9rem] text-extra-oscuro">
@@ -475,9 +481,12 @@ function DetalleMarcacion({ id }: { id: number }) {
 
       {m.estado === "CERRADA" && <PanelExtras m={m} onCambio={refrescar} />}
 
-      {m.estado === "REVISION" && modo === "ver" && (
+      {m.estado === "REVISION" && modo === "ver" && m.reingreso && m.salida && <AprobarReingreso id={m.id} onListo={refrescar} />}
+      {m.estado === "REVISION" && modo === "ver" && !(m.reingreso && m.salida) && (
         <p className="rounded-md border border-alerta/30 px-3 py-2 text-[0.93rem]">
-          Este turno quedó sin salida. Registra la hora real de salida para liquidarlo, o anúlalo si no corresponde.
+          {m.reingreso
+            ? "El empleado volvió a marcar después de cerrar su turno del día y aún no ha registrado la salida. Registra la salida para poder aprobarlo, o anúlalo si no corresponde."
+            : "Este turno quedó sin salida. Registra la hora real de salida para liquidarlo, o anúlalo si no corresponde."}
         </p>
       )}
 
@@ -531,10 +540,26 @@ function DetalleMarcacion({ id }: { id: number }) {
           <button className="btn btn-primario" onClick={() => setModo("editar")}>
             {m.estado === "REVISION" || m.estado === "ABIERTA" ? "Registrar salida o corregir" : "Corregir horas"}
           </button>
+          {m.estado === "CERRADA" && m.reabrir?.posible && (
+            <button className="btn btn-secundario" onClick={() => setModo("reabrir")}>
+              Reabrir turno
+            </button>
+          )}
           <button className="btn btn-peligro" onClick={() => setModo("anular")}>
             Anular
           </button>
         </div>
+      )}
+      {modo === "reabrir" && (
+        <FormReabrir
+          m={m}
+          onCancelar={() => setModo("ver")}
+          onListo={() => {
+            refrescar();
+            setModo("ver");
+            aviso("Turno reabierto: el empleado puede marcar su salida real");
+          }}
+        />
       )}
       {modo === "editar" && (
         <FormEditar
@@ -585,6 +610,9 @@ const ACCIONES: Record<string, string> = {
   EDITAR: "Corrección",
   ANULAR: "Anulación",
   ENVIAR_REVISION: "Enviada a revisión",
+  REINGRESO: "Reingreso en el mismo día",
+  REABRIR: "Turno reabierto",
+  APROBAR_REINGRESO: "Reingreso aprobado",
   APROBAR_EXTRAS: "Horas extra aprobadas",
   RECHAZAR_EXTRAS: "Horas extra rechazadas",
   CERRAR_SIN_CONEXION: "Salida recibida del kiosko sin conexión",
@@ -855,6 +883,74 @@ function FormEditar({ m, onCancelar, onListo }: { m: MarcacionDetalle; onCancela
       <div className="flex gap-2">
         <button className="btn btn-primario" disabled={mut.isPending}>
           {mut.isPending ? "Guardando…" : "Guardar corrección"}
+        </button>
+        <button type="button" className="btn btn-fantasma" onClick={onCancelar}>
+          Cancelar
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** Un reingreso cerrado no se liquida hasta que un supervisor lo aprueba (o lo corrige o anula). */
+function AprobarReingreso({ id, onListo }: { id: number; onListo: () => void }) {
+  const aviso = useAviso();
+  const [motivo, setMotivo] = useState("");
+  const mut = useMutation({
+    mutationFn: () => api(`/marcaciones/${id}/aprobar-reingreso`, { body: { motivo } }),
+    onSuccess: () => {
+      aviso("Reingreso aprobado: el turno ya cuenta en la liquidación");
+      onListo();
+    },
+  });
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        mut.mutate();
+      }}
+      className="space-y-3 rounded-[10px] border border-alerta/30 bg-alerta-claro/50 p-4"
+    >
+      <p className="text-[0.93rem]">
+        El empleado volvió a marcar después de cerrar su turno del día en la misma sucursal. Este tiempo no se liquida hasta que lo apruebes. Si no
+        corresponde, corrígelo o anúlalo.
+      </p>
+      <div>
+        <label className="etiqueta" htmlFor="r-mot">Motivo de la aprobación</label>
+        <input id="r-mot" required minLength={5} className="campo" placeholder="Ej.: lo llamaron para apoyar el despacho" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+      </div>
+      <MensajeError error={mut.error} />
+      <button className="btn btn-primario" disabled={mut.isPending || motivo.trim().length < 5}>
+        Aprobar reingreso
+      </button>
+    </form>
+  );
+}
+
+/** Reabre un turno cerrado por error: se quita la salida y vuelve a quedar abierto. Todo queda en el historial. */
+function FormReabrir({ m, onCancelar, onListo }: { m: MarcacionDetalle; onCancelar: () => void; onListo: () => void }) {
+  const [motivo, setMotivo] = useState("");
+  const mut = useMutation({ mutationFn: () => api(`/marcaciones/${m.id}/reabrir`, { body: { motivo } }), onSuccess: onListo });
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        mut.mutate();
+      }}
+      className="space-y-3 rounded-[10px] border border-linea-fuerte bg-papel p-4"
+    >
+      <p className="text-[0.93rem]">
+        Se quitará la salida de las <strong>{m.salida ? hora(m.salida) : "—"}</strong> y el turno volverá a quedar abierto para que el empleado marque
+        su salida real en el kiosko. La salida anulada, el motivo y quién lo autoriza quedan en el historial.
+      </p>
+      <div>
+        <label className="etiqueta" htmlFor="ra-mot">Motivo de la reapertura</label>
+        <input id="ra-mot" required minLength={5} className="campo" placeholder="Ej.: marcó la salida por error al pasar por el kiosko" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+      </div>
+      <MensajeError error={mut.error} />
+      <div className="flex gap-2">
+        <button className="btn btn-primario" disabled={mut.isPending || motivo.trim().length < 5}>
+          Reabrir turno
         </button>
         <button type="button" className="btn btn-fantasma" onClick={onCancelar}>
           Cancelar
