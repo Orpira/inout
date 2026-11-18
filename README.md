@@ -73,7 +73,7 @@ Crea 7 empleados (códigos 2001 a 2007) y 3 horarios terminados en "(simulación
 
 ### Usuario de solo consulta para demos
 
-Para enseñar la app sin que nadie altere los datos, crea desde **Usuarios** (con un administrador) un usuario con el rol **Solo consulta (demo)**. Ve lo mismo que un supervisor, pero la API rechaza cualquier escritura con `403 SOLO_CONSULTA`: no puede aprobar extras, editar marcaciones, cambiar su contraseña ni crear nada. La web muestra un aviso de «Modo consulta» y oculta el acceso al kiosko. El kiosko sigue siendo público por diseño; protégelo con `KIOSKO_TOKEN` si la demo es abierta.
+Para enseñar la app sin que nadie altere los datos, crea desde **Usuarios** (con un administrador) un usuario con el rol **Solo consulta (demo)**. Ve lo mismo que un supervisor, pero la API rechaza cualquier escritura con `403 SOLO_CONSULTA`: no puede aprobar extras, editar marcaciones, cambiar su contraseña ni crear nada. La web muestra un aviso de «Modo consulta» y oculta el acceso al kiosko. En el historial de cambios no ve lo que hicieron los administradores, solo los cambios de supervisores y del sistema. El kiosko sigue siendo público por diseño; protégelo con `KIOSKO_TOKEN` si la demo es abierta.
 
 | Empleado | Horario | Qué muestra |
 | --- | --- | --- |

@@ -6,12 +6,12 @@ import {
   parametrosVigentes,
   RECARGO_DOMINICAL,
 } from "@inout/core";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { auditoria, festivosAjustes, usuarios } from "../db/schema.js";
 import { noEncontrado } from "../errores.js";
 import { auditar, idFecha, motivoObligatorio } from "../servicios/auditoria.js";
-import { requiereSesion, zapp, type Rutas } from "../contexto.js";
+import { ocultarCambiosDeAdmin, requiereSesion, zapp, type Rutas } from "../contexto.js";
 import { fechaISO } from "./marcaciones.js";
 
 export const rutasConfig: Rutas = (app, { db, calendario }) => {
@@ -131,7 +131,13 @@ export const rutasConfig: Rutas = (app, { db, calendario }) => {
         })
         .from(auditoria)
         .leftJoin(usuarios, eq(usuarios.id, auditoria.usuarioId))
-        .where(and(eq(auditoria.entidad, req.query.entidad), req.query.entidadId ? eq(auditoria.entidadId, req.query.entidadId) : undefined))
+        .where(
+          and(
+            eq(auditoria.entidad, req.query.entidad),
+            req.query.entidadId ? eq(auditoria.entidadId, req.query.entidadId) : undefined,
+            ocultarCambiosDeAdmin(req.user.rol) ? or(isNull(usuarios.rol), ne(usuarios.rol, "ADMIN")) : undefined,
+          ),
+        )
         .orderBy(desc(auditoria.creadoEn))
         .limit(100),
     }),

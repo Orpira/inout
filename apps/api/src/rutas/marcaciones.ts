@@ -1,9 +1,9 @@
 import { desdeLocal, sumarDias } from "@inout/core";
-import { and, asc, count, desc, eq, gte, ilike, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, isNull, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { auditoria, empleados, liquidacionLineas, marcaciones, marcasOffline, usuarios } from "../db/schema.js";
 import { noEncontrado } from "../errores.js";
-import { requiereSesion, zapp, type Rutas } from "../contexto.js";
+import { ocultarCambiosDeAdmin, requiereSesion, zapp, type Rutas } from "../contexto.js";
 
 export const fechaISO = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD");
 const instante = z.string().datetime({ offset: true }).transform((v) => new Date(v));
@@ -166,7 +166,13 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
         })
         .from(auditoria)
         .leftJoin(usuarios, eq(usuarios.id, auditoria.usuarioId))
-        .where(and(eq(auditoria.entidad, "marcacion"), eq(auditoria.entidadId, m.id)))
+        .where(
+          and(
+            eq(auditoria.entidad, "marcacion"),
+            eq(auditoria.entidadId, m.id),
+            ocultarCambiosDeAdmin(req.user.rol) ? or(isNull(usuarios.rol), ne(usuarios.rol, "ADMIN")) : undefined,
+          ),
+        )
         .orderBy(desc(auditoria.creadoEn)),
     ]);
     return { ...m, lineas, historial };

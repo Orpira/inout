@@ -103,6 +103,19 @@ describe("autenticación y permisos", () => {
     expect((await api("GET", "/api/empleados")).json().datos).toHaveLength(0);
   });
 
+  it("el usuario de solo consulta no ve en el historial los cambios de un administrador", async () => {
+    await db.insert(usuarios).values({ nombre: "Demo", email: "demo@test.co", passwordHash: await hashPassword("clave-demo"), rol: "CONSULTA" });
+    const { cookie } = await login("demo@test.co", "clave-demo");
+    const e = await crearEmpleado();
+    const cambio = await api("PUT", `/api/empleados/${e.id}`, { identificacion: "1001", nombre: "Laura", apellido: "Gómez Ruiz", salario: 2_100_000, horarioId: null, motivo: "Corrección del apellido" });
+    expect(cambio.statusCode).toBe(200);
+    const url = `/api/config/auditoria?entidad=empleado&entidadId=${e.id}`;
+    const deAdmin = (await api("GET", url)).json().datos as unknown[];
+    expect(deAdmin.length).toBeGreaterThan(0);
+    expect((await api("GET", url, undefined, cookieSup)).json().datos).toHaveLength(deAdmin.length);
+    expect((await api("GET", url, undefined, cookie)).json().datos).toHaveLength(0);
+  });
+
   it("valida el cuerpo con mensajes legibles", async () => {
     const r = await api("POST", "/api/empleados", { identificacion: "1", nombre: "", apellido: "A", salario: -1 });
     expect(r.statusCode).toBe(400);

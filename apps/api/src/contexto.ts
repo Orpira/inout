@@ -55,3 +55,9 @@ export function requiereSesion(...roles: Rol[]) {
     }
   };
 }
+
+/**
+ * En el historial de cambios, el usuario de solo consulta no ve lo que hizo un administrador:
+ * la demo enseña el trabajo del día a día (kiosko, supervisores, sistema), no la gestión interna.
+ */
+export const ocultarCambiosDeAdmin = (rol: Rol) => rol === "CONSULTA";
