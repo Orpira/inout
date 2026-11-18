@@ -6,7 +6,7 @@ import { Cargando, Dialogo, Encabezado, MensajeError, useAviso } from "../compon
 import { api } from "../lib/api";
 import { fechaCorta, hora } from "../lib/formato";
 import { useSesion } from "../lib/sesion";
-import type { Usuario } from "../lib/tipos";
+import { NOMBRE_ROL, type Usuario } from "../lib/tipos";
 
 export default function Usuarios() {
   const { usuario } = useSesion();
@@ -48,7 +48,7 @@ export default function Usuarios() {
                     <button className="text-left hover:text-petroleo">{u.nombre}</button>
                   </td>
                   <td>{u.email}</td>
-                  <td>{u.rol === "ADMIN" ? "Administrador" : "Supervisor"}</td>
+                  <td>{NOMBRE_ROL[u.rol]}</td>
                   <td className="text-tinta-suave">{u.ultimoAcceso ? `${fechaCorta(u.ultimoAcceso)}, ${hora(u.ultimoAcceso)}` : "Nunca"}</td>
                   <td>{u.activo ? "Activo" : <span className="text-tinta-tenue">Desactivado</span>}</td>
                 </tr>
@@ -97,6 +97,7 @@ function FormUsuario({ u, onListo }: { u: Usuario | null; onListo: () => void })
         <select id="u-rol" className="campo" value={f.rol} onChange={(e) => setF({ ...f, rol: e.target.value as Usuario["rol"] })}>
           <option value="SUPERVISOR">Supervisor</option>
           <option value="ADMIN">Administrador</option>
+          <option value="CONSULTA">Solo consulta (demo)</option>
         </select>
       </div>
       <div>

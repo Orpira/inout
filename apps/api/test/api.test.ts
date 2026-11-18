@@ -87,6 +87,22 @@ describe("autenticación y permisos", () => {
     expect((await api("POST", "/api/empleados", { identificacion: "x" }, cookieSup)).statusCode).toBe(403);
   });
 
+  it("el usuario de solo consulta lee todo pero no guarda nada", async () => {
+    await db.insert(usuarios).values({ nombre: "Demo", email: "demo@test.co", passwordHash: await hashPassword("clave-demo"), rol: "CONSULTA" });
+    const { r, cookie } = await login("demo@test.co", "clave-demo");
+    expect(r.statusCode).toBe(200);
+    expect((await api("GET", "/api/auth/me", undefined, cookie)).json().usuario.rol).toBe("CONSULTA");
+    expect((await api("GET", "/api/empleados", undefined, cookie)).statusCode).toBe(200);
+    // Una ruta que sí puede usar un supervisor: al usuario de consulta se le rechaza por ser escritura.
+    const manual = await api("POST", "/api/marcaciones", {}, cookie);
+    expect(manual.statusCode).toBe(403);
+    expect(manual.json().codigo).toBe("SOLO_CONSULTA");
+    expect((await api("POST", "/api/auth/password", {}, cookie)).statusCode).toBe(403);
+    expect((await api("POST", "/api/empleados", { identificacion: "9" }, cookie)).statusCode).toBe(403);
+    expect((await api("GET", "/api/usuarios", undefined, cookie)).statusCode).toBe(403);
+    expect((await api("GET", "/api/empleados")).json().datos).toHaveLength(0);
+  });
+
   it("valida el cuerpo con mensajes legibles", async () => {
     const r = await api("POST", "/api/empleados", { identificacion: "1", nombre: "", apellido: "A", salario: -1 });
     expect(r.statusCode).toBe(400);

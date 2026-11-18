@@ -18,7 +18,7 @@ const publico = {
 const base = z.object({
   nombre: z.string().trim().min(2).max(100),
   email: z.string().trim().email(),
-  rol: z.enum(["ADMIN", "SUPERVISOR"]),
+  rol: z.enum(["ADMIN", "SUPERVISOR", "CONSULTA"]),
   activo: z.boolean().default(true),
 });
 

@@ -21,7 +21,7 @@ inout/
 │                   · parámetros legales con vigencia por fecha (Ley 2101/2021, Ley 2466/2025)
 │                   · motor de liquidación minuto a minuto
 ├── apps/api        Servidor HTTP: Fastify 5 + Drizzle ORM + PostgreSQL
-│                   · sesiones JWT en cookie httpOnly, roles ADMIN / SUPERVISOR
+│                   · sesiones JWT en cookie httpOnly, roles ADMIN / SUPERVISOR / CONSULTA
 │                   · validación con Zod, límites de peticiones, cabeceras de seguridad
 │                   · tarea periódica que cierra los turnos sin salida (16 h)   
 └── apps/web        Cliente: React 19 + Vite + Tailwind CSS 4 + TanStack Query
@@ -70,6 +70,10 @@ npm run db:simular -- --limpiar    # borra solo lo creado por la simulación
 ```
 
 Crea 7 empleados (códigos 2001 a 2007) y 3 horarios terminados en "(simulación)", y recorre el periodo usando los mismos servicios y endpoints de la aplicación, de modo que todo queda auditado con usuario y motivo. Necesita el administrador de `db:seed` (`ADMIN_EMAIL` / `ADMIN_PASSWORD`) y crea el supervisor `supervisor.simulacion@inout.local`, cuya clave se muestra al terminar (o se fija con `SIM_SUPERVISOR_PASSWORD`).
+
+### Usuario de solo consulta para demos
+
+Para enseñar la app sin que nadie altere los datos, crea desde **Usuarios** (con un administrador) un usuario con el rol **Solo consulta (demo)**. Ve lo mismo que un supervisor, pero la API rechaza cualquier escritura con `403 SOLO_CONSULTA`: no puede aprobar extras, editar marcaciones, cambiar su contraseña ni crear nada. La web muestra un aviso de «Modo consulta» y oculta el acceso al kiosko. El kiosko sigue siendo público por diseño; protégelo con `KIOSKO_TOKEN` si la demo es abierta.
 
 | Empleado | Horario | Qué muestra |
 | --- | --- | --- |

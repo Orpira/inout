@@ -18,7 +18,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-export const rolEnum = pgEnum("rol", ["ADMIN", "SUPERVISOR"]);
+export const rolEnum = pgEnum("rol", ["ADMIN", "SUPERVISOR", "CONSULTA"]);
 export const estadoMarcacionEnum = pgEnum("estado_marcacion", [
   "ABIERTA",
   "CERRADA",

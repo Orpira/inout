@@ -1,7 +1,8 @@
-import { Building2, CalendarClock, CalendarCog, ClipboardList, Clock3, LayoutGrid, LogOut, Menu, ReceiptText, Tablet, Users, UserCog } from "lucide-react";
+import { Building2, CalendarClock, CalendarCog, ClipboardList, Clock3, Eye, LayoutGrid, LogOut, Menu, ReceiptText, Tablet, Users, UserCog } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Navigate, Outlet, useLocation } from "react-router";
 import { useSesion } from "../lib/sesion";
+import { NOMBRE_ROL } from "../lib/tipos";
 import { Cargando } from "./ui";
 
 const NAV = [
@@ -35,6 +36,7 @@ export function Marco() {
   if (!usuario) return <Navigate to="/login" replace state={{ desde: loc.pathname }} />;
 
   const enlaces = NAV.filter((n) => !n.soloAdmin || usuario.rol === "ADMIN");
+  const soloConsulta = usuario.rol === "CONSULTA";
 
   return (
     <div className="min-h-dvh lg:grid lg:grid-cols-[232px_1fr]">
@@ -68,6 +70,7 @@ export function Marco() {
               {texto}
             </NavLink>
           ))}
+          {!soloConsulta && (
           <a
             href="/kiosko"
             target="_blank"
@@ -77,10 +80,11 @@ export function Marco() {
             <Tablet size={17} />
             Abrir kiosko
           </a>
+          )}
         </nav>
         <div className="border-t border-linea px-4 py-3">
           <p className="truncate text-[0.92rem] font-semibold">{usuario.nombre}</p>
-          <p className="truncate text-[0.82rem] text-tinta-tenue">{usuario.rol === "ADMIN" ? "Administrador" : "Supervisor"}</p>
+          <p className="truncate text-[0.82rem] text-tinta-tenue">{NOMBRE_ROL[usuario.rol]}</p>
           <button className="btn btn-fantasma -ml-2 mt-1 h-8 px-2" onClick={salir}>
             <LogOut size={15} /> Cerrar sesión
           </button>
@@ -89,6 +93,14 @@ export function Marco() {
 
       <main className="min-w-0 px-4 py-6 sm:px-8 lg:py-8">
         <div className="mx-auto max-w-[1240px]">
+          {soloConsulta && (
+            <p role="status" className="mb-5 flex items-start gap-2 rounded-md border border-petroleo/30 bg-petroleo-claro px-4 py-2.5 text-[0.92rem] text-petroleo-oscuro">
+              <Eye size={17} className="mt-0.5 shrink-0" />
+              <span>
+                <strong>Modo consulta.</strong> Puedes recorrer toda la app con datos de demostración; los cambios no se guardan.
+              </span>
+            </p>
+          )}
           <Outlet />
         </div>
       </main>
