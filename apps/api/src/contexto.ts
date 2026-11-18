@@ -8,7 +8,10 @@ import type { ServicioMarcaciones } from "./servicios/marcaciones.js";
 import type { ServicioOffline } from "./servicios/offline.js";
 import type { ServicioPeriodos } from "./servicios/periodos.js";
 
-export type Rol = "ADMIN" | "SUPERVISOR";
+/** CONSULTA: ve todo lo que ve un supervisor, pero no puede guardar ningún cambio (pensado para demos). */
+export type Rol = "ADMIN" | "SUPERVISOR" | "CONSULTA";
+
+const METODOS_LECTURA = new Set(["GET", "HEAD", "OPTIONS"]);
 
 export interface SesionUsuario {
   id: number;
@@ -45,6 +48,10 @@ export function requiereSesion(...roles: Rol[]) {
     }
     if (roles.length && !roles.includes(req.user.rol)) {
       throw new ErrorHttp(403, "No tienes permisos para esta acción", "PROHIBIDO");
+    }
+    // El usuario de solo consulta puede leer, nunca escribir: se aplica a todas las rutas con sesión.
+    if (req.user.rol === "CONSULTA" && !METODOS_LECTURA.has(req.method)) {
+      throw new ErrorHttp(403, "Usuario de solo consulta: puedes ver todo, pero no guardar cambios.", "SOLO_CONSULTA");
     }
   };
 }

@@ -1,6 +1,8 @@
 import type { Categoria, Horario as HorarioCore, ParametrosVigentes, ValidacionHorario } from "@inout/core";
 
-export type Rol = "ADMIN" | "SUPERVISOR";
+export type Rol = "ADMIN" | "SUPERVISOR" | "CONSULTA";
+
+export const NOMBRE_ROL: Record<Rol, string> = { ADMIN: "Administrador", SUPERVISOR: "Supervisor", CONSULTA: "Solo consulta" };
 export type EstadoMarcacion = "ABIERTA" | "CERRADA" | "REVISION" | "ANULADA";
 export type EstadoExtras = "SIN_EXTRAS" | "TOLERANCIA" | "PENDIENTE" | "APROBADAS" | "RECHAZADAS" | "AUTOMATICAS";
 

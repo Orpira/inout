@@ -49,6 +49,9 @@ export async function api<T>(ruta: string, opciones: { method?: string; body?: u
     if (res.status === 401 && !ruta.startsWith("/auth/login") && !ruta.startsWith("/kiosko")) {
       window.dispatchEvent(new Event("inout:sesion-expirada"));
     }
+    if (res.status === 403 && cuerpo.codigo === "SOLO_CONSULTA") {
+      window.dispatchEvent(new Event("inout:solo-consulta"));
+    }
     throw new ErrorApi(res.status, cuerpo.error ?? `Error ${res.status}`, cuerpo.codigo);
   }
   if (res.status === 204) return undefined as T;

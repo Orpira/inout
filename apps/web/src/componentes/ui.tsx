@@ -113,6 +113,12 @@ export function ProveedorAvisos({ children }: { children: ReactNode }) {
     setAvisos((a) => [...a, { id, texto, tipo }]);
     setTimeout(() => setAvisos((a) => a.filter((x) => x.id !== id)), 4000);
   }, []);
+  // Cualquier intento de guardar con el usuario de solo consulta se explica con un aviso.
+  useEffect(() => {
+    const alIntentar = () => avisar("Modo consulta: puedes ver todo, pero los cambios no se guardan.", "error");
+    window.addEventListener("inout:solo-consulta", alIntentar);
+    return () => window.removeEventListener("inout:solo-consulta", alIntentar);
+  }, [avisar]);
   return (
     <CtxAvisos.Provider value={avisar}>
       {children}

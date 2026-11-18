@@ -43,6 +43,13 @@
       "when": 1795010160828,
       "tag": "0005_empresa_sucursales",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1795013656339,
+      "tag": "0006_rol_consulta",
+      "breakpoints": true
     }
   ]
 }
