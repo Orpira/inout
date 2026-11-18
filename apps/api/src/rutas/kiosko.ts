@@ -16,6 +16,20 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
     if (env.KIOSKO_TOKEN && req.headers["x-kiosko-token"] !== env.KIOSKO_TOKEN) {
       throw new ErrorHttp(401, "Dispositivo de kiosko no autorizado", "KIOSKO_NO_AUTORIZADO");
     }
+    // Con la sesión de solo consulta abierta no se ficha, aunque el dispositivo tenga el token:
+    // el usuario de demo puede ver el kiosko, pero nunca registrar marcaciones.
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      let rol: string | undefined;
+      try {
+        await req.jwtVerify();
+        rol = req.user.rol;
+      } catch {
+        rol = undefined; // sin sesión: es una tablet normal
+      }
+      if (rol === "CONSULTA") {
+        throw new ErrorHttp(403, "Usuario de solo consulta: el kiosko se puede ver, pero las marcaciones no se registran.", "SOLO_CONSULTA");
+      }
+    }
   });
 
   const limite = { rateLimit: { max: 60, timeWindow: "1 minute" } };

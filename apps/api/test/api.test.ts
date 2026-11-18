@@ -103,6 +103,19 @@ describe("autenticación y permisos", () => {
     expect((await api("GET", "/api/empleados")).json().datos).toHaveLength(0);
   });
 
+  it("con la sesión de solo consulta abierta el kiosko no registra marcaciones", async () => {
+    await db.insert(usuarios).values({ nombre: "Demo", email: "demo@test.co", passwordHash: await hashPassword("clave-demo"), rol: "CONSULTA" });
+    const { cookie } = await login("demo@test.co", "clave-demo");
+    await crearEmpleado({ identificacion: "2001" });
+    const r = await api("POST", "/api/kiosko/marcar", { codigo: "2001" }, cookie);
+    expect(r.statusCode).toBe(403);
+    expect(r.json().codigo).toBe("SOLO_CONSULTA");
+    expect((await api("POST", "/api/kiosko/sincronizar", { enviadoEn: new Date().toISOString(), marcas: [] }, cookie)).statusCode).toBe(403);
+    expect((await api("GET", "/api/marcaciones")).json().datos).toHaveLength(0);
+    // Sin sesión (una tablet normal) sí ficha.
+    expect((await app.inject({ method: "POST", url: "/api/kiosko/marcar", payload: { codigo: "2001" } })).statusCode).toBe(200);
+  });
+
   it("el usuario de solo consulta no ve en el historial los cambios de un administrador", async () => {
     await db.insert(usuarios).values({ nombre: "Demo", email: "demo@test.co", passwordHash: await hashPassword("clave-demo"), rol: "CONSULTA" });
     const { cookie } = await login("demo@test.co", "clave-demo");
