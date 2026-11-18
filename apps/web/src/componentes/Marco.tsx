@@ -70,7 +70,6 @@ export function Marco() {
               {texto}
             </NavLink>
           ))}
-          {!soloConsulta && (
           <a
             href="/kiosko"
             target="_blank"
@@ -80,7 +79,6 @@ export function Marco() {
             <Tablet size={17} />
             Abrir kiosko
           </a>
-          )}
         </nav>
         <div className="border-t border-linea px-4 py-3">
           <p className="truncate text-[0.92rem] font-semibold">{usuario.nombre}</p>

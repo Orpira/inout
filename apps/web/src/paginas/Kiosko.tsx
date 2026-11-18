@@ -224,6 +224,11 @@ export default function Kiosko() {
     } catch (e) {
       if (sinRed(e)) return guardarEnTablet(limpio, turno);
       if (e instanceof ErrorApi && e.status === 404) return noEncontrado(limpio);
+      if (e instanceof ErrorApi && e.codigo === "KIOSKO_NO_AUTORIZADO") {
+        setError("Este dispositivo no está autorizado para fichar: puedes ver cómo funciona el kiosko, pero la marcación no se registra.");
+        setPaso({ t: "codigo" });
+        return;
+      }
       setError((e as Error).message);
       setPaso({ t: "codigo" });
     }
