@@ -4,6 +4,7 @@ import { Download, Lock } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { AvisoCierre, AvisoPendientes, DialogoCerrarPeriodo, DialogoReabrirPeriodo, HistorialPeriodos } from "../componentes/PeriodosLiquidados";
+import { ExtrasDiarias } from "../componentes/ExtrasDiarias";
 import { SelectorEmpleado } from "../componentes/SelectorEmpleado";
 import { Cargando, Encabezado, MensajeError, Vacio } from "../componentes/ui";
 import { api, descargar } from "../lib/api";
@@ -50,6 +51,7 @@ export default function Liquidacion() {
   const [cerrando, setCerrando] = useState<ReporteLiquidacion | null>(null);
   const [reabriendo, setReabriendo] = useState<PeriodoLiquidado | null>(null);
   const [empleadoId, setEmpleadoId] = useState<number | null>(null);
+  const [vista, setVista] = useState<"resumen" | "diario">("resumen");
   // Incluye inactivos: alguien dado de baja puede tener turnos por liquidar en el periodo.
   const emps = useQuery({ queryKey: ["empleados", "todos"], queryFn: () => api<{ datos: Empleado[] }>("/empleados?estado=todos") });
   const empleado = emps.data?.datos.find((e) => e.id === empleadoId);
@@ -136,7 +138,28 @@ export default function Liquidacion() {
         </div>
       </div>
 
-      {q.isPending ? (
+      <div className="mb-5 flex gap-1 border-b border-linea" role="tablist" aria-label="Vista de la liquidación">
+        {(
+          [
+            ["resumen", "Resumen por empleado"],
+            ["diario", "Detalle por día (horas extra)"],
+          ] as const
+        ).map(([id, texto]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={vista === id}
+            onClick={() => setVista(id)}
+            className={`-mb-px border-b-2 px-3 py-2 text-[0.93rem] font-medium ${vista === id ? "border-petroleo text-petroleo-oscuro" : "border-transparent text-tinta-suave hover:text-tinta"}`}
+          >
+            {texto}
+          </button>
+        ))}
+      </div>
+
+      {vista === "diario" ? (
+        <ExtrasDiarias desde={rango.desde} hasta={rango.hasta} empleadoId={empleadoId} />
+      ) : q.isPending ? (
         <Cargando />
       ) : q.error ? (
         <MensajeError error={q.error} />

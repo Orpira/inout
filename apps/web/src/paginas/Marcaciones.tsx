@@ -16,6 +16,59 @@ const ORIGEN: Record<Marcacion["origen"], string> = {
   MIGRACION: "Migrado del sistema anterior",
 };
 
+interface Contadores {
+  todas: number;
+  extrasPorAprobar: number;
+  porRevisar: number;
+  enTurno: number;
+}
+
+const PESTANAS: { id: string; texto: string; estado: string; extras: string; contador: keyof Contadores }[] = [
+  { id: "todas", texto: "Todas", estado: "", extras: "", contador: "todas" },
+  { id: "extras", texto: "Extras por aprobar", estado: "", extras: "PENDIENTE", contador: "extrasPorAprobar" },
+  { id: "revisar", texto: "Por revisar", estado: "REVISION", extras: "", contador: "porRevisar" },
+  { id: "turno", texto: "En turno", estado: "ABIERTA", extras: "", contador: "enTurno" },
+];
+
+/** Rechazo desde la fila de la lista: el motivo es obligatorio y queda en la auditoría. */
+function FormRechazo({ m, onListo }: { m: Marcacion; onListo: () => void }) {
+  const [motivo, setMotivo] = useState("");
+  const qc = useQueryClient();
+  const aviso = useAviso();
+  const mut = useMutation({
+    mutationFn: () => api(`/marcaciones/${m.id}/extras`, { body: { aprobar: false, motivo } }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["marcaciones"] });
+      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      aviso(`Horas extra de ${nombreCompleto(m.empleado)} rechazadas`);
+      onListo();
+    },
+  });
+  return (
+    <form
+      onSubmit={(e: FormEvent) => {
+        e.preventDefault();
+        mut.mutate();
+      }}
+      className="space-y-4"
+    >
+      <p className="text-tinta-suave">
+        {nombreCompleto(m.empleado)}, {fechaCorta(m.entrada)} ({hora(m.entrada)} a {m.salida ? hora(m.salida) : "—"}):{" "}
+        <strong className="text-extra-oscuro">{duracion(m.minutosExtraCalculados)}</strong> de horas extra calculadas.
+      </p>
+      <div>
+        <label className="etiqueta" htmlFor="rechazo-motivo">Motivo del rechazo</label>
+        <textarea id="rechazo-motivo" className="campo min-h-20" required minLength={5} value={motivo} onChange={(e) => setMotivo(e.target.value)} autoFocus />
+      </div>
+      <MensajeError error={mut.error} />
+      <div className="flex justify-end gap-2">
+        <button type="button" className="btn btn-secundario" onClick={onListo}>Cancelar</button>
+        <button className="btn btn-peligro" disabled={mut.isPending || motivo.trim().length < 5}>Rechazar extras</button>
+      </div>
+    </form>
+  );
+}
+
 export default function Marcaciones() {
   const [sp, setSp] = useSearchParams();
   const filtros = {
@@ -55,6 +108,25 @@ export default function Marcaciones() {
   const qc = useQueryClient();
   const aviso = useAviso();
   const modoAprobacion = filtros.extras === "PENDIENTE";
+  const qsContadores = new URLSearchParams({ desde: filtros.desde, hasta: filtros.hasta });
+  if (filtros.q) qsContadores.set("q", filtros.q);
+  const contadores = useQuery({
+    queryKey: ["marcaciones", "contadores", qsContadores.toString()],
+    queryFn: () => api<Contadores>(`/marcaciones/contadores?${qsContadores}`),
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+  const pestanaActiva = PESTANAS.find((p) => p.estado === filtros.estado && p.extras === filtros.extras)?.id ?? null;
+  const [rechazando, setRechazando] = useState<Marcacion | null>(null);
+  const revisar = useMutation({
+    mutationFn: (m: Marcacion) => api(`/marcaciones/${m.id}/extras`, { body: { aprobar: true } }),
+    onSuccess: (_r, m) => {
+      void qc.invalidateQueries({ queryKey: ["marcaciones"] });
+      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      aviso(`Horas extra de ${nombreCompleto(m.empleado)} aprobadas`);
+    },
+  });
+  const conAcciones = lista.data?.datos.some((m) => m.estadoExtras === "PENDIENTE") ?? false;
   const aprobarLote = useMutation({
     mutationFn: () => api<{ aprobadas: number }>("/marcaciones/extras/aprobar-lote", { body: { ids: [...seleccion] } }),
     onSuccess: (r) => {
@@ -81,6 +153,31 @@ export default function Marcaciones() {
           </>
         }
       />
+
+      <div className="mb-4 flex flex-wrap gap-2" role="tablist" aria-label="Vistas de marcaciones">
+        {PESTANAS.map((p) => {
+          const n = contadores.data?.[p.contador];
+          const activa = pestanaActiva === p.id;
+          return (
+            <button
+              key={p.id}
+              role="tab"
+              aria-selected={activa}
+              onClick={() => fijar({ estado: p.estado, extras: p.extras })}
+              className={`h-8 rounded-md border px-3 text-[0.9rem] font-medium ${
+                activa
+                  ? p.id === "extras"
+                    ? "border-extra bg-extra-claro text-extra-oscuro"
+                    : "border-petroleo bg-petroleo-claro text-petroleo-oscuro"
+                  : "border-linea-fuerte bg-superficie text-tinta-suave hover:bg-papel"
+              }`}
+            >
+              {p.texto}
+              {p.id !== "todas" && n ? <span className="tabular-nums"> · {n}</span> : null}
+            </button>
+          );
+        })}
+      </div>
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <div>
@@ -134,7 +231,7 @@ export default function Marcaciones() {
           )}
           <LeyendaCinta />
         </div>
-        <MensajeError error={aprobarLote.error} />
+        <MensajeError error={aprobarLote.error ?? revisar.error} />
         {lista.isPending ? (
           <Cargando />
         ) : lista.error ? (
@@ -168,6 +265,7 @@ export default function Marcaciones() {
                   <th className="num">Extra</th>
                   <th className="num">Recargos</th>
                   <th>Estado</th>
+                  {conAcciones && <th className="text-right">Horas extra</th>}
                 </tr>
               </thead>
               <tbody>
@@ -219,6 +317,25 @@ export default function Marcaciones() {
                     <td>
                       <EstadoChip estado={m.estado} />
                     </td>
+                    {conAcciones && (
+                      <td className="whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
+                        {m.estadoExtras === "PENDIENTE" && (
+                          <div className="inline-flex gap-2">
+                            <button
+                              className="btn btn-primario h-8"
+                              disabled={revisar.isPending}
+                              title={`Aprobar ${duracion(m.minutosExtraCalculados)} de horas extra`}
+                              onClick={() => revisar.mutate(m)}
+                            >
+                              Aprobar
+                            </button>
+                            <button className="btn btn-secundario h-8" onClick={() => setRechazando(m)}>
+                              Rechazar
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -232,6 +349,9 @@ export default function Marcaciones() {
 
       <Dialogo abierto={detalleId !== null} onCerrar={() => setDetalleId(null)} titulo="Detalle de la marcación" lateral ancho="max-w-[640px]">
         {detalleId !== null && <DetalleMarcacion id={detalleId} />}
+      </Dialogo>
+      <Dialogo abierto={rechazando !== null} onCerrar={() => setRechazando(null)} titulo="Rechazar horas extra">
+        {rechazando && <FormRechazo m={rechazando} onListo={() => setRechazando(null)} />}
       </Dialogo>
       <Dialogo abierto={nueva} onCerrar={() => setNueva(false)} titulo="Registrar marcación manual">
         {nueva && <FormNueva onListo={() => setNueva(false)} />}

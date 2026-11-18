@@ -6,6 +6,7 @@ import { conflicto, solicitudInvalida } from "../errores.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
 import { estadoDelRango, pendientesDelRango, periodosVigentes } from "../servicios/periodos.js";
 import { fechaISO } from "./marcaciones.js";
+import { libroExtrasDiarias, type FilaExtrasDiarias } from "../servicios/excel.js";
 
 const rango = z.object({
   desde: fechaISO,
@@ -41,8 +42,9 @@ const aCsv = (filas: unknown[][]) => "﻿" + filas.map((f) => f.map(csvCelda).jo
 const horas = (min: number) => (min / 60).toFixed(2).replace(".", ",");
 const pesos = (v: number) => v.toFixed(2).replace(".", ",");
 
-export const rutasReportes: Rutas = (app, { db }) => {
+export const rutasReportes: Rutas = (app, { db, env }) => {
   const r = zapp(app);
+  const ctxEmpresa = () => env.EMPRESA_NOMBRE ?? "";
 
   r.get("/liquidacion", { onRequest: requiereSesion(), schema: { querystring: rango } }, async (req, reply) => {
     const { desde, hasta, empleadoId, formato } = req.query;
@@ -215,6 +217,73 @@ export const rutasReportes: Rutas = (app, { db }) => {
     }
     return { desde, hasta, datos, totales, pendientes: resumenPendientes, cierre };
   });
+
+  /**
+   * Detalle por día de las horas extra de cada empleado (formato del reporte mensual de nómina):
+   * fecha, empleado, cédula, ingreso, salida y horas extra diurnas, nocturnas y dominicales/festivas.
+   * Solo cuenta las extras reconocidas; las pendientes van en su propia columna y no se suman.
+   */
+  r.get(
+    "/extras-diarias",
+    { onRequest: requiereSesion(), schema: { querystring: rango.extend({ formato: z.enum(["json", "xlsx"]).default("json") }) } },
+    async (req, reply) => {
+      const { desde, hasta, empleadoId, formato } = req.query;
+      if (hasta < desde) throw solicitudInvalida("El rango de fechas es inválido.");
+      const minCat = (cats: Categoria[]) =>
+        sql<number>`coalesce(sum(${liquidacionLineas.minutos}) filter (where ${liquidacionLineas.categoria} in (${sql.join(
+          cats.map((c) => sql`${c}`),
+          sql`, `,
+        )})),0)::int`;
+      const filas = await db
+        .select({
+          marcacionId: marcaciones.id,
+          empleadoId: empleados.id,
+          fecha: sql<string>`to_char(${marcaciones.entrada} at time zone 'America/Bogota', 'YYYY-MM-DD')`,
+          empleado: sql<string>`${empleados.nombre} || ' ' || ${empleados.apellido}`,
+          identificacion: empleados.identificacion,
+          entrada: sql<string>`to_char(${marcaciones.entrada} at time zone 'America/Bogota', 'HH24:MI')`,
+          salida: sql<string | null>`to_char(${marcaciones.salida} at time zone 'America/Bogota', 'HH24:MI')`,
+          salidaAutomatica: marcaciones.salidaAutomatica,
+          minDiurnas: minCat(["EXT_DIURNA"]),
+          minNocturnas: minCat(["EXT_NOCTURNA"]),
+          minFestivas: minCat(["EXT_DIURNA_DF", "EXT_NOCTURNA_DF"]),
+          minPendientes: sql<number>`(case when ${marcaciones.estadoExtras} = 'PENDIENTE' then coalesce(${marcaciones.minutosExtraCalculados},0) else 0 end)::int`,
+        })
+        .from(marcaciones)
+        .innerJoin(empleados, eq(empleados.id, marcaciones.empleadoId))
+        .leftJoin(liquidacionLineas, eq(liquidacionLineas.marcacionId, marcaciones.id))
+        .where(
+          and(
+            eq(marcaciones.estado, "CERRADA"),
+            gte(marcaciones.entrada, desdeLocal(desde)),
+            lt(marcaciones.entrada, desdeLocal(sumarDias(hasta, 1))),
+            empleadoId ? eq(marcaciones.empleadoId, empleadoId) : undefined,
+          ),
+        )
+        .groupBy(marcaciones.id, empleados.id)
+        .orderBy(asc(sql`lower(${empleados.nombre} || ' ' || ${empleados.apellido})`), asc(marcaciones.entrada));
+
+      const datos: FilaExtrasDiarias[] = filas.filter((f) => f.minDiurnas + f.minNocturnas + f.minFestivas + f.minPendientes > 0);
+      const totales = {
+        empleados: new Set(datos.map((f) => f.empleadoId)).size,
+        dias: datos.length,
+        minDiurnas: datos.reduce((s, f) => s + f.minDiurnas, 0),
+        minNocturnas: datos.reduce((s, f) => s + f.minNocturnas, 0),
+        minFestivas: datos.reduce((s, f) => s + f.minFestivas, 0),
+        minPendientes: datos.reduce((s, f) => s + f.minPendientes, 0),
+      };
+
+      if (formato === "xlsx") {
+        const libro = libroExtrasDiarias({ desde, hasta, empresa: ctxEmpresa(), filas: datos });
+        const sufijo = empleadoId && datos[0] ? `_${datos[0].identificacion.replace(/[^\w-]/g, "")}` : "";
+        reply
+          .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+          .header("Content-Disposition", `attachment; filename="horas-extra-diarias${sufijo}_${desde}_${hasta}.xlsx"`);
+        return reply.send(Buffer.from(await libro.xlsx.writeBuffer()));
+      }
+      return { desde, hasta, datos, totales };
+    },
+  );
 
   r.get("/marcaciones", { onRequest: requiereSesion(), schema: { querystring: rango.omit({ formato: true }) } }, async (req, reply) => {
     const { desde, hasta, empleadoId } = req.query;

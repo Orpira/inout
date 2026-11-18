@@ -101,6 +101,37 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
     },
   );
 
+  /** Contadores de las pestañas de Marcaciones, con el mismo rango de fechas y búsqueda que la lista. */
+  r.get(
+    "/contadores",
+    {
+      onRequest: sesion,
+      schema: { querystring: z.object({ desde: fechaISO.optional(), hasta: fechaISO.optional(), q: z.string().optional() }) },
+    },
+    async (req) => {
+      const f = req.query;
+      const filtros: (SQL | undefined)[] = [
+        f.desde ? gte(marcaciones.entrada, desdeLocal(f.desde)) : undefined,
+        f.hasta ? lt(marcaciones.entrada, desdeLocal(sumarDias(f.hasta, 1))) : undefined,
+      ];
+      if (f.q) {
+        const p = `%${f.q.trim()}%`;
+        filtros.push(or(ilike(sql`${empleados.nombre} || ' ' || ${empleados.apellido}`, p), ilike(empleados.identificacion, p)));
+      }
+      const [c] = await db
+        .select({
+          todas: sql<number>`count(*)::int`,
+          extrasPorAprobar: sql<number>`count(*) filter (where ${marcaciones.estadoExtras} = 'PENDIENTE')::int`,
+          porRevisar: sql<number>`count(*) filter (where ${marcaciones.estado} = 'REVISION')::int`,
+          enTurno: sql<number>`count(*) filter (where ${marcaciones.estado} = 'ABIERTA')::int`,
+        })
+        .from(marcaciones)
+        .innerJoin(empleados, eq(empleados.id, marcaciones.empleadoId))
+        .where(and(...filtros));
+      return c ?? { todas: 0, extrasPorAprobar: 0, porRevisar: 0, enTurno: 0 };
+    },
+  );
+
   r.get("/:id", { onRequest: sesion, schema: { params: id } }, async (req) => {
     const [m] = await db
       .select(columnasMarcacion)
