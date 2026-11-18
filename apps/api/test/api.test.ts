@@ -354,6 +354,38 @@ describe("horarios y aprobación de horas extra", () => {
     const m = (await marcarManual(id, "2026-10-31", "08:00", "12:00")).json();
     expect((await api("GET", `/api/marcaciones/${m.id}`)).json()).toMatchObject({ estadoExtras: "AUTOMATICAS", minutosExtra: 240, valorRecargos: 50_000 });
   });
+
+  it("reporte diario de extras (diurnas, nocturnas, festivas y por aprobar), Excel y contadores de pestañas", async () => {
+    const auto = (await api("POST", "/api/horarios", { ...horarioAdministrativo, nombre: "Auto", requiereAprobacion: false })).json();
+    const conAprob = (await api("POST", "/api/horarios", { ...horarioAdministrativo, nombre: "Con aprobación" })).json();
+    const a = await crearEmpleado({ identificacion: "2001", horarioId: auto.id });
+    const b = await crearEmpleado({ identificacion: "2002", horarioId: conAprob.id });
+    await marcarManual(a.id, "2026-11-01", "08:00", "11:00"); // domingo: todo extra festiva
+    await marcarManual(a.id, "2026-11-04", "08:00", "21:00"); // miércoles: 2 h diurnas + 2 h nocturnas
+    await marcarManual(a.id, "2026-11-05", "08:00", "17:00"); // sin extras: no aparece
+    await marcarManual(b.id, "2026-11-04", "08:00", "19:00"); // 2 h por aprobar
+
+    const r = (await api("GET", "/api/reportes/extras-diarias?desde=2026-11-01&hasta=2026-11-30", undefined, cookieSup)).json();
+    expect(r.datos).toHaveLength(3);
+    const [dom, mie] = r.datos.filter((f: { identificacion: string }) => f.identificacion === "2001");
+    expect(dom).toMatchObject({ fecha: "2026-11-01", entrada: "08:00", salida: "11:00", minDiurnas: 0, minNocturnas: 0, minFestivas: 180 });
+    expect(mie).toMatchObject({ fecha: "2026-11-04", minDiurnas: 120, minNocturnas: 120, minFestivas: 0, minPendientes: 0 });
+    expect(r.datos.find((f: { identificacion: string }) => f.identificacion === "2002")).toMatchObject({ minDiurnas: 0, minPendientes: 120 });
+    expect(r.totales).toMatchObject({ empleados: 2, dias: 3, minDiurnas: 120, minNocturnas: 120, minFestivas: 180, minPendientes: 120 });
+
+    const solo = (await api("GET", `/api/reportes/extras-diarias?desde=2026-11-01&hasta=2026-11-30&empleadoId=${b.id}`)).json();
+    expect(solo.datos).toHaveLength(1);
+
+    const x = await api("GET", "/api/reportes/extras-diarias?desde=2026-11-01&hasta=2026-11-30&formato=xlsx");
+    expect(x.statusCode).toBe(200);
+    expect(x.headers["content-type"]).toContain("spreadsheetml");
+    expect(x.headers["content-disposition"]).toContain("horas-extra-diarias_2026-11-01_2026-11-30.xlsx");
+    expect(x.rawPayload.subarray(0, 2).toString()).toBe("PK");
+
+    const c = (await api("GET", "/api/marcaciones/contadores?desde=2026-11-01&hasta=2026-11-30")).json();
+    expect(c).toEqual({ todas: 4, extrasPorAprobar: 1, porRevisar: 0, enTurno: 0 });
+    expect((await api("GET", "/api/marcaciones/contadores?desde=2026-11-01&hasta=2026-11-30&q=2002")).json().todas).toBe(1);
+  });
 });
 
 describe("kiosko sin conexión", () => {

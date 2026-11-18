@@ -199,3 +199,25 @@ export interface ReporteLiquidacion {
     periodos: { id: number; desde: string; hasta: string; cerradoEn: string; nota: string | null }[];
   };
 }
+
+export interface FilaExtrasDiarias {
+  marcacionId: number;
+  empleadoId: number;
+  fecha: string;
+  empleado: string;
+  identificacion: string;
+  entrada: string;
+  salida: string | null;
+  salidaAutomatica: boolean;
+  minDiurnas: number;
+  minNocturnas: number;
+  minFestivas: number;
+  minPendientes: number;
+}
+
+export interface ReporteExtrasDiarias {
+  desde: string;
+  hasta: string;
+  datos: FilaExtrasDiarias[];
+  totales: { empleados: number; dias: number; minDiurnas: number; minNocturnas: number; minFestivas: number; minPendientes: number };
+}
