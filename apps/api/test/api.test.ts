@@ -1,6 +1,7 @@
 import { desdeLocal, diaSemana, fechaLocal, sumarDias } from "@inout/core";
 import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import ExcelJS from "exceljs";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { construirApp } from "../src/app.js";
 import { crearDb } from "../src/db/client.js";
@@ -40,7 +41,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   app.ctx.calendario.invalidar();
-  await db.execute(sql`truncate periodos_liquidados, marcas_offline, auditoria, liquidacion_lineas, marcaciones, empleados, horarios, usuarios, festivos_ajustes restart identity cascade`);
+  await db.execute(sql`truncate periodos_liquidados, marcas_offline, auditoria, liquidacion_lineas, marcaciones, empleados, horarios, sucursales, empresa, usuarios, festivos_ajustes restart identity cascade`);
   await db.insert(usuarios).values([
     { nombre: "Admin", email: "admin@test.co", passwordHash: await hashPassword("clave-admin"), rol: "ADMIN" },
     // Hash generado por Laravel (bcrypt $2y$) para "password"
@@ -588,5 +589,154 @@ describe("cierre de periodos liquidados", () => {
 
     const audit = await db.execute(sql`select accion from auditoria where entidad = 'periodo' order by id`);
     expect(audit.map((a) => a.accion)).toEqual(["CERRAR_PERIODO", "REABRIR_PERIODO", "CERRAR_PERIODO"]);
+  });
+});
+
+describe("empresa, sucursales y centros de costo", () => {
+  // Sede Norte en Bogotá; la Sur a ~10 km.
+  const norte = { codigo: "BOD-N", nombre: "Bodega Norte", ciudad: "Bogotá", latitud: 4.7609, longitud: -74.0466, radioMetros: 300 };
+  const sur = { codigo: "BOD-S", nombre: "Bodega Sur", ciudad: "Bogotá", latitud: 4.6702, longitud: -74.1307, radioMetros: 300 };
+  /** L-S de 06:00 a 13:00 (42 h), turno propio de la Bodega Sur. */
+  const turnoSur = (sucursalId: number) => ({
+    nombre: "Mañana Sur",
+    tipo: "FIJO",
+    dias: [0, 1, 2, 3, 4, 5, 6].map((d) => (d >= 1 && d <= 6 ? { laborable: true, inicio: "06:00", fin: "13:00" } : { laborable: false })),
+    descanso: null,
+    toleranciaMinutos: 0,
+    requiereAprobacion: false,
+    sucursalId,
+  });
+  const marcar = (payload: object) => app.inject({ method: "POST", url: "/api/kiosko/marcar", payload });
+  const nuevoEmpleado = async (identificacion: string, sucursalId: number | null, horarioId: number | null) => {
+    const r = await api("POST", "/api/empleados", { identificacion, nombre: "Ana", apellido: identificacion, salario: 2_100_000, horarioId, sucursalId });
+    expect(r.statusCode).toBe(201);
+    return r.json() as { id: number };
+  };
+  async function preparar() {
+    const n = (await api("POST", "/api/empresa/sucursales", norte)).json();
+    const s = (await api("POST", "/api/empresa/sucursales", sur)).json();
+    const admin = (await api("POST", "/api/horarios", horarioAdministrativo)).json();
+    const ts = (await api("POST", "/api/horarios", turnoSur(s.id))).json();
+    return { n, s, admin, ts };
+  }
+
+  it("guarda la razón social con auditoría y la usa en el Excel", async () => {
+    expect((await api("GET", "/api/empresa")).json().empresa).toMatchObject({ definida: false });
+    expect((await api("PUT", "/api/empresa", { nombre: "SLI SAS" }, cookieSup)).statusCode).toBe(403);
+    expect((await api("PUT", "/api/empresa", { nombre: "SLI SAS", nit: "900.123.456-7" })).statusCode).toBe(200);
+    expect((await api("PUT", "/api/empresa", { nombre: "SISTEMAS LOGÍSTICOS INDUSTRIALES SAS" })).statusCode).toBe(400);
+    const ok = await api("PUT", "/api/empresa", { nombre: "SISTEMAS LOGÍSTICOS INDUSTRIALES SAS", nit: "900.123.456-7", motivo: "Razón social completa" });
+    expect(ok.json().nombre).toBe("SISTEMAS LOGÍSTICOS INDUSTRIALES SAS");
+    const hist = (await api("GET", "/api/config/auditoria?entidad=empresa&entidadId=1")).json().datos;
+    expect(hist.map((h: { accion: string }) => h.accion)).toEqual(["EDITAR", "CREAR"]);
+
+    const x = await api("GET", "/api/reportes/extras-diarias?desde=2026-11-01&hasta=2026-11-30&formato=xlsx");
+    const libro = new ExcelJS.Workbook();
+    await libro.xlsx.load(x.rawPayload as unknown as ArrayBuffer);
+    expect(libro.worksheets[0]!.getCell("C1").value).toBe("SISTEMAS LOGÍSTICOS INDUSTRIALES SAS");
+  });
+
+  it("valida las sucursales: códigos únicos, coordenadas completas y motivo al editar", async () => {
+    const n = await api("POST", "/api/empresa/sucursales", norte);
+    expect(n.statusCode).toBe(201);
+    expect((await api("POST", "/api/empresa/sucursales", { ...sur, codigo: "bod-n" })).statusCode).toBe(409);
+    expect((await api("POST", "/api/empresa/sucursales", { ...sur, longitud: null })).statusCode).toBe(400);
+    expect((await api("PUT", `/api/empresa/sucursales/${n.json().id}`, { ...norte, radioMetros: 500 })).statusCode).toBe(400);
+    const e = await api("PUT", `/api/empresa/sucursales/${n.json().id}`, { ...norte, radioMetros: 500, motivo: "La bodega es más grande" });
+    expect(e.json().radioMetros).toBe(500);
+    expect((await app.inject({ method: "GET", url: "/api/kiosko/sucursales" })).json().datos).toHaveLength(1);
+  });
+
+  it("en otra sucursal avisa que el turno no corresponde, deja elegirlo y verifica la ubicación", async () => {
+    const { n, s, admin, ts } = await preparar();
+    await nuevoEmpleado("3001", n.id, admin.id);
+    await nuevoEmpleado("3002", s.id, ts.id);
+
+    // Empleado de la Norte marca en el kiosko de la Sur: primero debe elegir el turno.
+    const pregunta = (await marcar({ codigo: "3001", sucursalId: s.id })).json();
+    expect(pregunta).toMatchObject({ tipo: "ELEGIR_TURNO", sucursal: { nombre: "Bodega Sur" }, sucursalBase: "Bodega Norte" });
+    expect(pregunta.opciones).toEqual([
+      { horarioId: ts.id, nombre: "Mañana Sur", habitual: false },
+      { horarioId: null, nombre: "Mi turno habitual (Administrativo L-V)", habitual: true },
+    ]);
+    expect((await api("GET", "/api/marcaciones/contadores")).json().todas).toBe(0); // no registró nada
+
+    // Elige el turno de la Sur desde una tablet a ~10 km de la sede.
+    const e = (await marcar({ codigo: "3001", sucursalId: s.id, turno: { horarioId: ts.id }, ubicacion: { latitud: norte.latitud, longitud: norte.longitud, precisionMetros: 20 } })).json();
+    expect(e.tipo).toBe("ENTRADA");
+    const m = (await api("GET", `/api/marcaciones/${e.marcacion.id}`)).json();
+    expect(m).toMatchObject({ sucursalId: s.id, sucursal: "Bodega Sur", horarioId: ts.id, turno: "Mañana Sur", fueraDeSede: true });
+    expect(m.distanciaSedeMetros).toBeGreaterThan(9000);
+    // La salida no vuelve a preguntar.
+    expect((await marcar({ codigo: "3001", sucursalId: s.id })).json().tipo).toBe("SALIDA");
+
+    // En su propia sucursal no pregunta; cerca de la sede no hay aviso de ubicación.
+    const propia = (await marcar({ codigo: "3002", sucursalId: s.id, ubicacion: { latitud: sur.latitud, longitud: sur.longitud + 0.001, precisionMetros: 15 } })).json();
+    expect(propia.tipo).toBe("ENTRADA");
+    expect((await api("GET", `/api/marcaciones/${propia.marcacion.id}`)).json()).toMatchObject({ sucursalId: s.id, horarioId: null, fueraDeSede: false });
+
+    // Un kiosko sin sucursal (versión anterior) imputa a la sucursal base del empleado.
+    await api("POST", "/api/empleados", { identificacion: "3003", nombre: "Luis", apellido: "Mora", salario: 2_100_000, sucursalId: n.id });
+    const viejo = (await marcar({ codigo: "3003" })).json();
+    expect((await api("GET", `/api/marcaciones/${viejo.marcacion.id}`)).json().sucursalId).toBe(n.id);
+    expect((await api("GET", `/api/marcaciones?sucursalId=${s.id}`)).json().total).toBe(2);
+  });
+
+  it("sin conexión nunca rechaza por sucursal: sin turno elegido usa el horario habitual", async () => {
+    const { n, s, admin } = await preparar();
+    await nuevoEmpleado("3001", n.id, admin.id);
+    const r = await app.inject({
+      method: "POST",
+      url: "/api/kiosko/sincronizar",
+      payload: {
+        enviadoEn: new Date().toISOString(),
+        marcas: [{ id: "6f1d8c8e-1a1b-4c4c-9d9d-000000000001", codigo: "3001", capturadoEn: new Date(Date.now() - 600_000).toISOString(), sucursalId: s.id }],
+      },
+    });
+    expect(r.json().resultados[0]).toMatchObject({ estado: "APLICADA", tipo: "ENTRADA" });
+    const lista = (await api("GET", "/api/marcaciones")).json().datos;
+    expect(lista[0]).toMatchObject({ sucursalId: s.id, horarioId: null });
+  });
+
+  it("el turno elegido rige la jornada del día y la liquidación se desglosa por centro de costo", async () => {
+    const { n, s, admin, ts } = await preparar();
+    const { id } = await nuevoEmpleado("3001", n.id, admin.id);
+    // Miércoles en su sede: 1 h extra pendiente (administrativo con aprobación).
+    await api("POST", "/api/marcaciones", { empleadoId: id, entrada: desdeLocal("2026-11-04", "08:00").toISOString(), salida: desdeLocal("2026-11-04", "18:00").toISOString(), motivo: "Olvidó marcar" });
+    // Sábado cubriendo la Sur con su turno: dentro de la jornada, sin extras.
+    const sab = (
+      await api("POST", "/api/marcaciones", {
+        empleadoId: id,
+        entrada: desdeLocal("2026-10-31", "08:00").toISOString(),
+        salida: desdeLocal("2026-10-31", "12:00").toISOString(),
+        sucursalId: s.id,
+        horarioId: ts.id,
+        motivo: "Cubrió turno en la Sur",
+      })
+    ).json();
+    expect((await api("GET", `/api/marcaciones/${sab.id}`)).json()).toMatchObject({ sucursalId: s.id, estadoExtras: "SIN_EXTRAS", minutosExtraCalculados: 0 });
+    // Con su horario habitual, el sábado sería todo extra: el turno cambia la jornada.
+    await api("PATCH", `/api/marcaciones/${sab.id}`, { horarioId: null, motivo: "Prueba sin el turno de la Sur" });
+    expect((await api("GET", `/api/marcaciones/${sab.id}`)).json()).toMatchObject({ estadoExtras: "PENDIENTE", minutosExtraCalculados: 240 });
+    await api("PATCH", `/api/marcaciones/${sab.id}`, { horarioId: ts.id, motivo: "Vuelve al turno de la Sur" });
+
+    const liq = (await api("GET", "/api/reportes/liquidacion?desde=2026-10-26&hasta=2026-11-08")).json();
+    expect(liq.porCentroCosto.map((c: { codigo: string; turnos: number }) => [c.codigo, c.turnos])).toEqual([
+      ["BOD-N", 1],
+      ["BOD-S", 1],
+    ]);
+    expect(liq.datos).toHaveLength(1);
+    expect(liq.datos[0].centros).toHaveLength(2);
+    expect(liq.porCentroCosto[1].minutosTotales).toBe(240);
+    expect(liq.porCentroCosto[1].valorTotal).toBe(0);
+
+    const csv = (await api("GET", "/api/reportes/liquidacion?desde=2026-10-26&hasta=2026-11-08&formato=csv")).body.trim().split("\r\n");
+    expect(csv[0]).toMatch(/^\uFEFF?Código centro de costo;Centro de costo;Identificación/);
+    expect(csv.slice(1).map((l) => l.split(";").slice(0, 3).join(";"))).toEqual(["BOD-N;Bodega Norte;3001", "BOD-S;Bodega Sur;3001"]);
+
+    const soloSur = (await api("GET", `/api/reportes/liquidacion?desde=2026-10-26&hasta=2026-11-08&sucursalId=${s.id}`)).json();
+    expect(soloSur.totales.turnos).toBe(1);
+    const diario = (await api("GET", `/api/reportes/extras-diarias?desde=2026-10-26&hasta=2026-11-08`)).json();
+    expect(diario.datos[0]).toMatchObject({ codigoCentro: "BOD-N", centro: "Bodega Norte", minPendientes: 60 });
   });
 });

@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { HistorialCambios } from "../componentes/Historial";
 import { Cargando, Dialogo, Encabezado, MensajeError, useAviso, Vacio } from "../componentes/ui";
+import { etiquetaSucursal, useEmpresa } from "../lib/sucursales";
 import { api } from "../lib/api";
 import { duracion, horasDecimales } from "../lib/formato";
 import { useSesion } from "../lib/sesion";
@@ -131,6 +132,8 @@ function FormHorario({ h, onListo }: { h: Horario | null; onListo: () => void })
   const [tolerancia, setTolerancia] = useState(String(h?.toleranciaMinutos ?? 0));
   const [aprobacion, setAprobacion] = useState(h?.requiereAprobacion ?? true);
   const [activo, setActivo] = useState(h?.activo ?? true);
+  const [sucursalId, setSucursalId] = useState(h?.sucursalId ? String(h.sucursalId) : "");
+  const sucursales = useEmpresa().data?.sucursales ?? [];
   const [motivo, setMotivo] = useState("");
 
   const num = (v: string) => Number(v.replace(",", ".")) || 0;
@@ -162,7 +165,7 @@ function FormHorario({ h, onListo }: { h: Horario | null; onListo: () => void })
 
   const mut = useMutation({
     mutationFn: () => {
-      const body = { ...horario, nombre, activo, ...(h ? { motivo } : {}) };
+      const body = { ...horario, nombre, activo, sucursalId: sucursalId ? Number(sucursalId) : null, ...(h ? { motivo } : {}) };
       return h ? api(`/horarios/${h.id}`, { method: "PUT", body }) : api("/horarios", { body });
     },
     onSuccess: () => {
@@ -188,6 +191,22 @@ function FormHorario({ h, onListo }: { h: Horario | null; onListo: () => void })
         <div>
           <label className="etiqueta" htmlFor="h-nombre">Nombre</label>
           <input id="h-nombre" required className="campo" placeholder="Ej.: Administrativo L-V" value={nombre} onChange={(e) => setNombre(e.target.value)} />
+          {sucursales.length > 0 && (
+            <div className="mt-3">
+              <label className="etiqueta" htmlFor="h-sucursal">Sucursal del turno</label>
+              <select id="h-sucursal" className="campo" value={sucursalId} onChange={(e) => setSucursalId(e.target.value)}>
+                <option value="">Cualquier sucursal</option>
+                {sucursales
+                  .filter((s) => s.activa || String(s.id) === sucursalId)
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {etiquetaSucursal(s)}
+                    </option>
+                  ))}
+              </select>
+              <p className="mt-1 text-[0.8rem] text-tinta-tenue">Es uno de los turnos que el kiosko ofrece a quien viene a cubrir esa sucursal.</p>
+            </div>
+          )}
         </div>
         <fieldset>
           <legend className="etiqueta">Tipo</legend>

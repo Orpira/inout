@@ -112,7 +112,7 @@ export const rutasConfig: Rutas = (app, { db, calendario }) => {
       onRequest: requiereSesion(),
       schema: {
         querystring: z.object({
-          entidad: z.enum(["empleado", "horario", "festivo"]),
+          entidad: z.enum(["empleado", "horario", "festivo", "empresa", "sucursal"]),
           entidadId: z.coerce.number().int().optional(),
         }),
       },

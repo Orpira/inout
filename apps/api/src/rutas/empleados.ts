@@ -1,6 +1,6 @@
 import { and, asc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
-import { empleados, horarios } from "../db/schema.js";
+import { empleados, horarios, sucursales } from "../db/schema.js";
 import { conflicto, noEncontrado, solicitudInvalida } from "../errores.js";
 import { auditar, diferencias, motivoObligatorio } from "../servicios/auditoria.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
@@ -17,6 +17,7 @@ export const esquemaEmpleado = z.object({
   telefono: opcional,
   salario: z.coerce.number().min(0, "No puede ser negativo").max(1_000_000_000),
   horarioId: z.coerce.number().int().nullish().transform((v) => v ?? null),
+  sucursalId: z.coerce.number().int().nullish().transform((v) => v ?? null),
   fechaIngreso: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish().or(z.literal("")).transform((v) => (v ? v : null)),
   activo: z.boolean().default(true),
 });
@@ -34,12 +35,14 @@ export const rutasEmpleados: Rutas = (app, { db }) => {
         querystring: z.object({
           q: z.string().optional(),
           estado: z.enum(["activos", "inactivos", "todos"]).default("activos"),
+          sucursalId: z.coerce.number().int().optional(),
         }),
       },
     },
     async (req) => {
       const filtros: (SQL | undefined)[] = [];
       if (req.query.estado !== "todos") filtros.push(eq(empleados.activo, req.query.estado === "activos"));
+      if (req.query.sucursalId) filtros.push(eq(empleados.sucursalId, req.query.sucursalId));
       if (req.query.q) {
         const p = `%${req.query.q.trim()}%`;
         filtros.push(
@@ -56,14 +59,16 @@ export const rutasEmpleados: Rutas = (app, { db }) => {
         .select({
           empleado: empleados,
           horario: horarios.nombre,
+          sucursal: sucursales.nombre,
           // Columna cualificada a mano: dentro de la subconsulta un "id" sin tabla se resolvería como m.id.
           enTurno: sql<boolean>`exists(select 1 from marcaciones m where m.empleado_id = "empleados"."id" and m.estado = 'ABIERTA')`,
         })
         .from(empleados)
         .leftJoin(horarios, eq(horarios.id, empleados.horarioId))
+        .leftJoin(sucursales, eq(sucursales.id, empleados.sucursalId))
         .where(and(...filtros))
         .orderBy(asc(empleados.apellido), asc(empleados.nombre));
-      return { datos: filas.map((f) => ({ ...f.empleado, horario: f.horario, enTurno: f.enTurno })) };
+      return { datos: filas.map((f) => ({ ...f.empleado, horario: f.horario, sucursal: f.sucursal, enTurno: f.enTurno })) };
     },
   );
 

@@ -16,6 +16,7 @@ import { COOKIE_SESION, rutasAuth } from "./rutas/auth.js";
 import { rutasConfig } from "./rutas/config.js";
 import { rutasDashboard } from "./rutas/dashboard.js";
 import { rutasEmpleados } from "./rutas/empleados.js";
+import { rutasEmpresa } from "./rutas/empresa.js";
 import { rutasHorarios } from "./rutas/horarios.js";
 import { rutasKiosko } from "./rutas/kiosko.js";
 import { rutasMarcaciones } from "./rutas/marcaciones.js";
@@ -106,6 +107,7 @@ export async function construirApp(env: Env, opciones: { db?: Db; logger?: boole
     ["/api/dashboard", rutasDashboard],
     ["/api/config", rutasConfig],
     ["/api/usuarios", rutasUsuarios],
+    ["/api/empresa", rutasEmpresa],
   ] as const;
   for (const [prefix, rutas] of modulos) {
     await app.register(async (sub) => rutas(sub, ctx), { prefix });

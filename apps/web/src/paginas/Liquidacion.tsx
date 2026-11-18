@@ -10,7 +10,8 @@ import { Cargando, Encabezado, MensajeError, Vacio } from "../componentes/ui";
 import { api, descargar } from "../lib/api";
 import { fechaISOCorta, horasDecimales, hoyLocal, nombreCompleto, pesos } from "../lib/formato";
 import { useSesion } from "../lib/sesion";
-import type { Empleado, PeriodoLiquidado, ReporteLiquidacion } from "../lib/tipos";
+import { etiquetaSucursal, useEmpresa } from "../lib/sucursales";
+import type { CentroCosto, Empleado, PeriodoLiquidado, ReporteLiquidacion } from "../lib/tipos";
 
 const RECARGOS: Categoria[] = ["ORD_NOCTURNA", "ORD_DIURNA_DF", "ORD_NOCTURNA_DF"];
 const EXTRAS: Categoria[] = ["EXT_DIURNA", "EXT_NOCTURNA", "EXT_DIURNA_DF", "EXT_NOCTURNA_DF"];
@@ -52,12 +53,14 @@ export default function Liquidacion() {
   const [reabriendo, setReabriendo] = useState<PeriodoLiquidado | null>(null);
   const [empleadoId, setEmpleadoId] = useState<number | null>(null);
   const [vista, setVista] = useState<"resumen" | "diario">("resumen");
+  const [sucursalId, setSucursalId] = useState<number | null>(null);
+  const sucursales = useEmpresa().data?.sucursales ?? [];
   // Incluye inactivos: alguien dado de baja puede tener turnos por liquidar en el periodo.
   const emps = useQuery({ queryKey: ["empleados", "todos"], queryFn: () => api<{ datos: Empleado[] }>("/empleados?estado=todos") });
   const empleado = emps.data?.datos.find((e) => e.id === empleadoId);
-  const consulta = `/reportes/liquidacion?desde=${rango.desde}&hasta=${rango.hasta}${empleadoId ? `&empleadoId=${empleadoId}` : ""}`;
+  const consulta = `/reportes/liquidacion?desde=${rango.desde}&hasta=${rango.hasta}${empleadoId ? `&empleadoId=${empleadoId}` : ""}${sucursalId ? `&sucursalId=${sucursalId}` : ""}`;
   const q = useQuery({
-    queryKey: ["liquidacion", rango, empleadoId],
+    queryKey: ["liquidacion", rango, empleadoId, sucursalId],
     queryFn: async () => {
       const r = await api<ReporteLiquidacion>(consulta);
       // Una API anterior al cierre de periodos no envía estos campos: la pantalla sigue funcionando sin ellos.
@@ -76,6 +79,8 @@ export default function Liquidacion() {
     ? "Cargando…"
     : empleadoId
       ? "Quita el filtro de empleado: el periodo se cierra para todos."
+      : sucursalId
+        ? "Quita el filtro de centro de costo: la liquidación es una sola para toda la empresa."
       : q.data.apiDesactualizada
         ? "El servidor aún no tiene esta función: hay que actualizar la API."
         : rango.hasta >= hoyLocal()
@@ -136,6 +141,19 @@ export default function Liquidacion() {
           <label className="etiqueta" htmlFor="l-emp">Empleado</label>
           <SelectorEmpleado id="l-emp" empleados={emps.data?.datos ?? []} valor={empleadoId} onCambiar={setEmpleadoId} cargando={emps.isPending} />
         </div>
+        {sucursales.length > 0 && (
+          <div>
+            <label className="etiqueta" htmlFor="l-suc">Centro de costo</label>
+            <select id="l-suc" className="campo w-52" value={sucursalId ?? ""} onChange={(e) => setSucursalId(e.target.value ? Number(e.target.value) : null)}>
+              <option value="">Todos</option>
+              {sucursales.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {etiquetaSucursal(x)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       <div className="mb-5 flex gap-1 border-b border-linea" role="tablist" aria-label="Vista de la liquidación">
@@ -158,7 +176,7 @@ export default function Liquidacion() {
       </div>
 
       {vista === "diario" ? (
-        <ExtrasDiarias desde={rango.desde} hasta={rango.hasta} empleadoId={empleadoId} />
+        <ExtrasDiarias desde={rango.desde} hasta={rango.hasta} empleadoId={empleadoId} sucursalId={sucursalId} />
       ) : q.isPending ? (
         <Cargando />
       ) : q.error ? (
@@ -210,6 +228,10 @@ export default function Liquidacion() {
             </div>
           </dl>
 
+          {(q.data.porCentroCosto?.length ?? 0) > 1 || (q.data.porCentroCosto?.length === 1 && q.data.porCentroCosto[0]!.sucursalId !== null) ? (
+            <SubtotalesCentro centros={q.data.porCentroCosto!} />
+          ) : null}
+
           <div className="panel overflow-x-auto">
             {q.data.datos.length === 0 ? (
               <Vacio titulo={empleado ? `${nombreCompleto(empleado)} no tiene turnos cerrados en este periodo` : "No hay turnos cerrados en este periodo"} />
@@ -238,6 +260,11 @@ export default function Liquidacion() {
                       <td>
                         <p className="font-semibold">{f.nombre}</p>
                         <p className="text-[0.82rem] text-tinta-tenue tabular-nums">{f.identificacion}</p>
+                        {f.centros && (f.centros.length > 1 || f.centros[0]?.sucursalId) && (
+                          <p className="text-[0.82rem] text-tinta-suave">
+                            {f.centros.map((c) => `${c.codigo ?? c.nombre}: ${pesos(c.valorTotal)}`).join(" · ")}
+                          </p>
+                        )}
                         {f.minutosExtraPendientes > 0 && (
                           <p className="text-[0.82rem] font-medium text-extra-oscuro">{horasDecimales(f.minutosExtraPendientes)} h extra por aprobar</p>
                         )}
@@ -292,6 +319,42 @@ export default function Liquidacion() {
       <HistorialPeriodos periodos={historial} esAdmin={esAdmin} onVer={(p) => setRango({ desde: p.desde, hasta: p.hasta })} onReabrir={setReabriendo} />
       <DialogoCerrarPeriodo reporte={cerrando} onCerrar={() => setCerrando(null)} />
       <DialogoReabrirPeriodo periodo={reabriendo} onCerrar={() => setReabriendo(null)} />
+    </div>
+  );
+}
+
+/** Subtotales de la misma liquidación por centro de costo (sucursal donde se trabajó). */
+function SubtotalesCentro({ centros }: { centros: CentroCosto[] }) {
+  const total = centros.reduce((s, c) => s + c.valorTotal, 0);
+  return (
+    <div className="panel mb-6 overflow-x-auto">
+      <table className="tabla">
+        <thead>
+          <tr>
+            <th>Centro de costo</th>
+            <th className="num">Turnos</th>
+            <th className="num">Horas</th>
+            <th className="num">Horas extra</th>
+            <th className="num">Total a liquidar</th>
+            <th className="num">Participación</th>
+          </tr>
+        </thead>
+        <tbody>
+          {centros.map((c) => (
+            <tr key={c.sucursalId ?? "sin"}>
+              <td>
+                <span className="font-semibold">{c.nombre}</span>
+                {c.codigo && <span className="ml-2 text-[0.84rem] text-tinta-tenue tabular-nums">{c.codigo}</span>}
+              </td>
+              <td className="num">{c.turnos}</td>
+              <td className="num">{horasDecimales(c.minutosTotales)}</td>
+              <td className="num text-extra-oscuro">{horasDecimales(c.minutosExtra)}</td>
+              <td className="num font-semibold">{pesos(c.valorTotal)}</td>
+              <td className="num text-tinta-suave">{total ? `${Math.round((c.valorTotal / total) * 100)} %` : "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

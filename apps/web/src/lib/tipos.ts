@@ -8,6 +8,8 @@ export interface Horario extends HorarioCore {
   id: number;
   nombre: string;
   activo: boolean;
+  /** Sucursal del turno (null = cualquier sucursal). */
+  sucursalId?: number | null;
   empleados?: number;
   validacion?: ValidacionHorario;
 }
@@ -46,6 +48,9 @@ export interface Empleado {
   salario: number;
   horarioId: number | null;
   horario?: string | null;
+  /** Sucursal (centro de costo) base. */
+  sucursalId?: number | null;
+  sucursal?: string | null;
   fechaIngreso: string | null;
   activo: boolean;
   enTurno?: boolean;
@@ -69,6 +74,16 @@ export interface Marcacion {
   estadoExtras: EstadoExtras | null;
   valorRecargos: number | null;
   alertas: string[];
+  /** Centro de costo donde se trabajó. */
+  sucursalId?: number | null;
+  sucursal?: string | null;
+  /** Turno elegido al cubrir otra sucursal (null = el habitual del empleado). */
+  horarioId?: number | null;
+  turno?: string | null;
+  distanciaSedeMetros?: number | null;
+  precisionMetros?: number | null;
+  /** La tablet marcó más lejos de la sede que su radio. */
+  fueraDeSede?: boolean;
   empleado: Pick<Empleado, "id" | "nombre" | "apellido" | "identificacion" | "cargo">;
 }
 
@@ -145,6 +160,8 @@ export interface FilaLiquidacion {
   valorTotal: number;
   categorias: Partial<Record<Categoria, { minutos: number; valor: number }>>;
   alertas: string[];
+  /** Desglose por centro de costo. */
+  centros?: CentroCosto[];
 }
 
 export interface PendientesPeriodo {
@@ -192,6 +209,8 @@ export interface ReporteLiquidacion {
     valorTotal: number;
     categorias: Record<Categoria, { minutos: number; valor: number }>;
   };
+  /** Subtotales por centro de costo de la misma liquidación (puede faltar con una API anterior). */
+  porCentroCosto?: CentroCosto[];
   pendientes: PendientesPeriodo;
   cierre: {
     /** LIQUIDADO: todos los días del rango están cerrados. MIXTO: solo una parte. */
@@ -209,6 +228,8 @@ export interface FilaExtrasDiarias {
   entrada: string;
   salida: string | null;
   salidaAutomatica: boolean;
+  codigoCentro?: string | null;
+  centro?: string | null;
   minDiurnas: number;
   minNocturnas: number;
   minFestivas: number;
@@ -220,4 +241,32 @@ export interface ReporteExtrasDiarias {
   hasta: string;
   datos: FilaExtrasDiarias[];
   totales: { empleados: number; dias: number; minDiurnas: number; minNocturnas: number; minFestivas: number; minPendientes: number };
+}
+
+export interface CentroCosto {
+  sucursalId: number | null;
+  codigo: string | null;
+  nombre: string;
+  turnos: number;
+  minutosTotales: number;
+  minutosExtra: number;
+  valorTotal: number;
+  categorias: Partial<Record<Categoria, { minutos: number; valor: number }>>;
+}
+
+export interface Sucursal {
+  id: number;
+  codigo: string;
+  nombre: string;
+  ciudad: string | null;
+  direccion: string | null;
+  latitud: number | null;
+  longitud: number | null;
+  radioMetros: number;
+  activa: boolean;
+}
+
+export interface DatosEmpresa {
+  empresa: { nombre: string; nit: string | null; definida: boolean };
+  sucursales: Sucursal[];
 }

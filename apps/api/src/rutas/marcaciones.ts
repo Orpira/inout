@@ -27,6 +27,16 @@ export const columnasMarcacion = {
   estadoExtras: marcaciones.estadoExtras,
   valorRecargos: marcaciones.valorRecargos,
   alertas: marcaciones.alertas,
+  sucursalId: marcaciones.sucursalId,
+  horarioId: marcaciones.horarioId,
+  distanciaSedeMetros: marcaciones.distanciaSedeMetros,
+  precisionMetros: marcaciones.precisionMetros,
+  // Subconsultas (y no joins) para que todas las consultas que usan estas columnas sigan funcionando igual.
+  sucursal: sql<string | null>`(select s.nombre from sucursales s where s.id = "marcaciones"."sucursal_id")`,
+  /** Turno elegido al cubrir otra sucursal. */
+  turno: sql<string | null>`(select h.nombre from horarios h where h.id = "marcaciones"."horario_id")`,
+  /** La tablet marcó más lejos de la sede que su radio (más el margen de precisión del GPS). */
+  fueraDeSede: sql<boolean>`coalesce((select "marcaciones"."distancia_sede_metros" > s.radio_metros + coalesce("marcaciones"."precision_metros", 0) from sucursales s where s.id = "marcaciones"."sucursal_id"), false)`,
   empleado: {
     id: empleados.id,
     nombre: empleados.nombre,
@@ -50,6 +60,7 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
           desde: fechaISO.optional(),
           hasta: fechaISO.optional(),
           empleadoId: z.coerce.number().int().optional(),
+          sucursalId: z.coerce.number().int().optional(),
           estado: z.enum(["ABIERTA", "CERRADA", "REVISION", "ANULADA"]).optional(),
           q: z.string().optional(),
           soloExtras: z.coerce.boolean().optional(),
@@ -67,6 +78,7 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
         f.desde ? gte(marcaciones.entrada, desdeLocal(f.desde)) : undefined,
         f.hasta ? lt(marcaciones.entrada, desdeLocal(sumarDias(f.hasta, 1))) : undefined,
         f.empleadoId ? eq(marcaciones.empleadoId, f.empleadoId) : undefined,
+        f.sucursalId ? eq(marcaciones.sucursalId, f.sucursalId) : undefined,
         f.estado ? eq(marcaciones.estado, f.estado) : undefined,
         f.soloExtras ? sql`${marcaciones.minutosExtraCalculados} > 0` : undefined,
         f.salidaAutomatica ? eq(marcaciones.salidaAutomatica, true) : undefined,
@@ -106,13 +118,14 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
     "/contadores",
     {
       onRequest: sesion,
-      schema: { querystring: z.object({ desde: fechaISO.optional(), hasta: fechaISO.optional(), q: z.string().optional() }) },
+      schema: { querystring: z.object({ desde: fechaISO.optional(), hasta: fechaISO.optional(), q: z.string().optional(), sucursalId: z.coerce.number().int().optional() }) },
     },
     async (req) => {
       const f = req.query;
       const filtros: (SQL | undefined)[] = [
         f.desde ? gte(marcaciones.entrada, desdeLocal(f.desde)) : undefined,
         f.hasta ? lt(marcaciones.entrada, desdeLocal(sumarDias(f.hasta, 1))) : undefined,
+        f.sucursalId ? eq(marcaciones.sucursalId, f.sucursalId) : undefined,
       ];
       if (f.q) {
         const p = `%${f.q.trim()}%`;
@@ -169,6 +182,10 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
           entrada: instante,
           salida: instante.nullish(),
           observacion: z.string().trim().max(1000).nullish(),
+          /** Centro de costo donde se trabajó (por defecto, la sucursal base del empleado). */
+          sucursalId: z.number().int().nullish(),
+          /** Turno realizado si no es el habitual del empleado. */
+          horarioId: z.number().int().nullish(),
           motivo,
         }),
       },
@@ -190,6 +207,8 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
           entrada: instante.optional(),
           salida: instante.nullish(),
           observacion: z.string().trim().max(1000).nullish(),
+          sucursalId: z.number().int().nullish(),
+          horarioId: z.number().int().nullish(),
           motivo,
         }),
       },

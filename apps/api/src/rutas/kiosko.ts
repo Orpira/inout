@@ -1,7 +1,7 @@
 import { fechaLocal, horarioLegalPorDefecto, salidaProgramada } from "@inout/core";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
-import { empleados, horarios, marcaciones as marcacionesT } from "../db/schema.js";
+import { empleados, horarios, marcaciones as marcacionesT, sucursales } from "../db/schema.js";
 import { ErrorHttp } from "../errores.js";
 import { zapp, type Rutas } from "../contexto.js";
 
@@ -20,6 +20,23 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
 
   const limite = { rateLimit: { max: 60, timeWindow: "1 minute" } };
   const codigo = z.string().trim().min(1).max(40);
+  /** Dónde y con qué turno se marca (kioskos asociados a una sucursal). Todo opcional: los kioskos antiguos no lo envían. */
+  const contexto = {
+    sucursalId: z.number().int().nullish(),
+    turno: z.object({ horarioId: z.number().int().nullable() }).nullish(),
+    ubicacion: z
+      .object({ latitud: z.number().min(-90).max(90), longitud: z.number().min(-180).max(180), precisionMetros: z.number().min(0).nullish() })
+      .nullish(),
+  };
+
+  /** Sucursales activas, para asociar el kiosko a una de ellas (la más cercana se propone por GPS). */
+  r.get("/sucursales", { config: limite }, async () => ({
+    datos: await db
+      .select({ id: sucursales.id, codigo: sucursales.codigo, nombre: sucursales.nombre, ciudad: sucursales.ciudad, latitud: sucursales.latitud, longitud: sucursales.longitud, radioMetros: sucursales.radioMetros })
+      .from(sucursales)
+      .where(eq(sucursales.activa, true))
+      .orderBy(asc(sucursales.nombre)),
+  }));
 
   r.get(
     "/empleado/:codigo",
@@ -29,9 +46,15 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
 
   r.post(
     "/marcar",
-    { config: limite, schema: { body: z.object({ codigo }) } },
+    { config: limite, schema: { body: z.object({ codigo, ...contexto }) } },
     async (req) => {
-      const r = await marcaciones.marcar(req.body.codigo);
+      const { codigo, sucursalId, turno, ubicacion } = req.body;
+      // Entrada en una sucursal que no es la del empleado: primero debe elegir el turno que va a realizar.
+      if (!turno) {
+        const eleccion = await marcaciones.turnoParaEntrada(codigo, sucursalId);
+        if (eleccion) return { tipo: "ELEGIR_TURNO" as const, ...eleccion };
+      }
+      const r = await marcaciones.marcar(codigo, { sucursalId, turno, ubicacion });
       return {
         tipo: r.tipo,
         empleado: r.empleado,
@@ -65,13 +88,24 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
         cargo: empleados.cargo,
         abiertaDesde: marcacionesT.entrada,
         horario: horarios,
+        sucursalId: empleados.sucursalId,
+        horarioId: empleados.horarioId,
       })
       .from(empleados)
       .leftJoin(marcacionesT, and(eq(marcacionesT.empleadoId, empleados.id), eq(marcacionesT.estado, "ABIERTA")))
       .leftJoin(horarios, eq(horarios.id, empleados.horarioId))
       .where(eq(empleados.activo, true));
+    // Con esto el kiosko puede pedir el turno sin conexión cuando alguien marca en otra sucursal.
+    const turnos = await db
+      .select({ id: horarios.id, nombre: horarios.nombre, sucursalId: horarios.sucursalId })
+      .from(horarios)
+      .where(eq(horarios.activo, true))
+      .orderBy(asc(horarios.nombre));
+    const sedes = await db.select({ id: sucursales.id, nombre: sucursales.nombre }).from(sucursales);
     return {
       generadoEn: new Date().toISOString(),
+      turnos,
+      sucursales: sedes,
       // Con más horas sin salida, el kiosko da el turno por cerrado y la marcación es una entrada nueva.
       maxHorasTurno: env.MAX_HORAS_TURNO,
       empleados: filas.map(({ horario, ...e }) => ({
@@ -97,6 +131,7 @@ export const rutasKiosko: Rutas = (app, { db, env, marcaciones, offline }) => {
                 id: z.string().uuid(),
                 codigo,
                 capturadoEn: z.string().datetime({ offset: true }).transform((v) => new Date(v)),
+                ...contexto,
               }),
             )
             .max(500),

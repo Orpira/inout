@@ -1,10 +1,11 @@
 import { CATEGORIAS, ETIQUETAS, desdeLocal, formatearMinutos, lunesDeSemana, MAX_EXTRA_SEMANA_MIN, sumarDias, type Categoria } from "@inout/core";
 import { and, asc, eq, gte, lt, sql } from "drizzle-orm";
 import { z } from "zod";
-import { empleados, liquidacionLineas, marcaciones } from "../db/schema.js";
+import { empleados, liquidacionLineas, marcaciones, sucursales } from "../db/schema.js";
 import { conflicto, solicitudInvalida } from "../errores.js";
 import { requiereSesion, zapp, type Rutas } from "../contexto.js";
 import { estadoDelRango, pendientesDelRango, periodosVigentes } from "../servicios/periodos.js";
+import { nombreEmpresa } from "./empresa.js";
 import { fechaISO } from "./marcaciones.js";
 import { libroExtrasDiarias, type FilaExtrasDiarias } from "../servicios/excel.js";
 
@@ -12,6 +13,8 @@ const rango = z.object({
   desde: fechaISO,
   hasta: fechaISO,
   empleadoId: z.coerce.number().int().optional(),
+  /** Solo la parte de un centro de costo (la liquidación sigue siendo una sola). */
+  sucursalId: z.coerce.number().int().optional(),
   formato: z.enum(["json", "csv"]).default("json"),
 });
 
@@ -32,7 +35,23 @@ interface FilaReporte {
   valorTotal: number;
   categorias: Partial<Record<Categoria, { minutos: number; valor: number }>>;
   alertas: string[];
+  /** Desglose por centro de costo (sucursal donde se trabajó). */
+  centros: CentroCosto[];
 }
+
+interface CentroCosto {
+  sucursalId: number | null;
+  codigo: string | null;
+  nombre: string;
+  turnos: number;
+  minutosTotales: number;
+  minutosExtra: number;
+  valorTotal: number;
+  categorias: Partial<Record<Categoria, { minutos: number; valor: number }>>;
+}
+
+const SIN_CENTRO = "Sin centro de costo";
+const redondear = (v: number) => Math.round(v * 100) / 100;
 
 const csvCelda = (v: unknown) => {
   const s = v === null || v === undefined ? "" : String(v);
@@ -44,10 +63,9 @@ const pesos = (v: number) => v.toFixed(2).replace(".", ",");
 
 export const rutasReportes: Rutas = (app, { db, env }) => {
   const r = zapp(app);
-  const ctxEmpresa = () => env.EMPRESA_NOMBRE ?? "";
 
   r.get("/liquidacion", { onRequest: requiereSesion(), schema: { querystring: rango } }, async (req, reply) => {
-    const { desde, hasta, empleadoId, formato } = req.query;
+    const { desde, hasta, empleadoId, sucursalId, formato } = req.query;
     if (hasta < desde) throw solicitudInvalida("El rango de fechas es inválido.");
     const ini = desdeLocal(desde);
     const fin = desdeLocal(sumarDias(hasta, 1));
@@ -56,6 +74,7 @@ export const rutasReportes: Rutas = (app, { db, env }) => {
       gte(marcaciones.entrada, ini),
       lt(marcaciones.entrada, fin),
       empleadoId ? eq(marcaciones.empleadoId, empleadoId) : undefined,
+      sucursalId ? eq(marcaciones.sucursalId, sucursalId) : undefined,
     );
 
     const [liquidados, pendientes] = await Promise.all([periodosVigentes(db, desde, hasta), pendientesDelRango(db, desde, hasta, empleadoId)]);
@@ -64,7 +83,7 @@ export const rutasReportes: Rutas = (app, { db, env }) => {
       throw conflicto("El rango mezcla días ya liquidados con días sin liquidar. Ajusta las fechas para no pagar dos veces.", "PERIODO_MIXTO");
     }
 
-    const [porCategoria, porEmpleado, porSemana] = await Promise.all([
+    const [porCategoria, porEmpleado, porSemana, porCentro, porCentroCategoria] = await Promise.all([
       db
         .select({
           empleadoId: marcaciones.empleadoId,
@@ -104,10 +123,37 @@ export const rutasReportes: Rutas = (app, { db, env }) => {
         .from(marcaciones)
         .where(filtroMarc)
         .groupBy(marcaciones.empleadoId, sql`2`),
+      db
+        .select({
+          empleadoId: marcaciones.empleadoId,
+          sucursalId: marcaciones.sucursalId,
+          codigo: sucursales.codigo,
+          nombre: sucursales.nombre,
+          turnos: sql<number>`count(*)::int`,
+          minutosTotales: sql<number>`coalesce(sum(${marcaciones.minutosTotales}),0)::int`,
+          minutosExtra: sql<number>`coalesce(sum(${marcaciones.minutosExtra}),0)::int`,
+          valorTotal: sql<number>`coalesce(sum(${marcaciones.valorRecargos}),0)::float8`,
+        })
+        .from(marcaciones)
+        .leftJoin(sucursales, eq(sucursales.id, marcaciones.sucursalId))
+        .where(filtroMarc)
+        .groupBy(marcaciones.empleadoId, marcaciones.sucursalId, sucursales.codigo, sucursales.nombre),
+      db
+        .select({
+          empleadoId: marcaciones.empleadoId,
+          sucursalId: marcaciones.sucursalId,
+          categoria: liquidacionLineas.categoria,
+          minutos: sql<number>`sum(${liquidacionLineas.minutos})::int`,
+          valor: sql<number>`sum(${liquidacionLineas.valor})::float8`,
+        })
+        .from(liquidacionLineas)
+        .innerJoin(marcaciones, eq(marcaciones.id, liquidacionLineas.marcacionId))
+        .where(filtroMarc)
+        .groupBy(marcaciones.empleadoId, marcaciones.sucursalId, liquidacionLineas.categoria),
     ]);
 
     const filas = new Map<number, FilaReporte & { orden: string }>(
-      porEmpleado.map((e) => [e.empleadoId, { ...e, turnosPorRevisar: 0, turnosEnCurso: 0, categorias: {}, alertas: [] }]),
+      porEmpleado.map((e) => [e.empleadoId, { ...e, turnosPorRevisar: 0, turnosEnCurso: 0, categorias: {}, alertas: [], centros: [] }]),
     );
     // Quien solo tiene turnos sin resolver también aparece (en ceros), para que nómina no lo pase por alto.
     for (const p of pendientes.porEmpleado) {
@@ -131,6 +177,7 @@ export const rutasReportes: Rutas = (app, { db, env }) => {
             valorTotal: 0,
             categorias: {},
             alertas: [],
+            centros: [],
           })
           .get(p.empleadoId)!;
       f.turnosPorRevisar = p.porRevisar;
@@ -140,6 +187,47 @@ export const rutasReportes: Rutas = (app, { db, env }) => {
       const f = filas.get(c.empleadoId);
       if (f) f.categorias[c.categoria] = { minutos: c.minutos, valor: Math.round(c.valor * 100) / 100 };
     }
+    // Desglose por centro de costo: una sola liquidación, con las horas imputadas a la sucursal donde se trabajó.
+    const clave = (emp: number, suc: number | null) => `${emp}|${suc ?? ""}`;
+    const centros = new Map<string, CentroCosto>();
+    for (const c of porCentro) {
+      const centro: CentroCosto = {
+        sucursalId: c.sucursalId,
+        codigo: c.codigo,
+        nombre: c.nombre ?? SIN_CENTRO,
+        turnos: c.turnos,
+        minutosTotales: c.minutosTotales,
+        minutosExtra: c.minutosExtra,
+        valorTotal: redondear(c.valorTotal),
+        categorias: {},
+      };
+      centros.set(clave(c.empleadoId, c.sucursalId), centro);
+      filas.get(c.empleadoId)?.centros.push(centro);
+    }
+    for (const c of porCentroCategoria) {
+      const centro = centros.get(clave(c.empleadoId, c.sucursalId));
+      if (centro) centro.categorias[c.categoria] = { minutos: c.minutos, valor: redondear(c.valor) };
+    }
+    for (const f of filas.values()) f.centros.sort((a, b) => (a.sucursalId === null ? 1 : b.sucursalId === null ? -1 : a.nombre.localeCompare(b.nombre, "es")));
+    const subtotales = new Map<number | null, CentroCosto>();
+    for (const c of centros.values()) {
+      const t =
+        subtotales.get(c.sucursalId) ??
+        subtotales
+          .set(c.sucursalId, { sucursalId: c.sucursalId, codigo: c.codigo, nombre: c.nombre, turnos: 0, minutosTotales: 0, minutosExtra: 0, valorTotal: 0, categorias: {} })
+          .get(c.sucursalId)!;
+      t.turnos += c.turnos;
+      t.minutosTotales += c.minutosTotales;
+      t.minutosExtra += c.minutosExtra;
+      t.valorTotal = redondear(t.valorTotal + c.valorTotal);
+      for (const [cat, v] of Object.entries(c.categorias) as [Categoria, { minutos: number; valor: number }][]) {
+        const a = (t.categorias[cat] ??= { minutos: 0, valor: 0 });
+        a.minutos += v.minutos;
+        a.valor = redondear(a.valor + v.valor);
+      }
+    }
+    const porCentroCosto = [...subtotales.values()].sort((a, b) => (a.sucursalId === null ? 1 : b.sucursalId === null ? -1 : a.nombre.localeCompare(b.nombre, "es")));
+
     // Límite semanal de 12 horas extra
     const semanas = new Map<string, number>();
     for (const d of porSemana) {
@@ -177,7 +265,11 @@ export const rutasReportes: Rutas = (app, { db, env }) => {
     };
 
     if (formato === "csv") {
+      // Una fila por empleado y centro de costo: nómina imputa cada valor a la sucursal donde se trabajó.
+      // Lo que no depende del centro (pendientes, turnos por revisar, alertas) va solo en la primera fila del empleado.
       const encabezado = [
+        "Código centro de costo",
+        "Centro de costo",
         "Identificación",
         "Empleado",
         "Cargo",
@@ -193,29 +285,36 @@ export const rutasReportes: Rutas = (app, { db, env }) => {
         "Estado del periodo",
       ];
       const textoEstado = estado === "LIQUIDADO" ? "Liquidado" : "Sin cerrar";
-      const cuerpo = datos.map((f) => [
-        f.identificacion,
-        f.nombre,
-        f.cargo,
-        pesos(f.salario),
-        f.turnos,
-        horas(f.minutosTotales),
-        horas(f.minutosExtra),
-        horas(f.minutosExtraPendientes),
-        f.turnosPorRevisar + f.turnosEnCurso,
-        ...CATEGORIAS.flatMap((c) => [horas(f.categorias[c]?.minutos ?? 0), pesos(f.categorias[c]?.valor ?? 0)]),
-        pesos(f.valorTotal),
-        f.alertas.join(" | "),
-        textoEstado,
-      ]);
+      const vacio: CentroCosto = { sucursalId: null, codigo: null, nombre: SIN_CENTRO, turnos: 0, minutosTotales: 0, minutosExtra: 0, valorTotal: 0, categorias: {} };
+      const cuerpo = datos.flatMap((f) =>
+        (f.centros.length ? f.centros : [vacio]).map((c, i) => [
+          c.codigo,
+          c.nombre,
+          f.identificacion,
+          f.nombre,
+          f.cargo,
+          pesos(f.salario),
+          c.turnos,
+          horas(c.minutosTotales),
+          horas(c.minutosExtra),
+          i === 0 ? horas(f.minutosExtraPendientes) : "",
+          i === 0 ? f.turnosPorRevisar + f.turnosEnCurso : "",
+          ...CATEGORIAS.flatMap((cat) => [horas(c.categorias[cat]?.minutos ?? 0), pesos(c.categorias[cat]?.valor ?? 0)]),
+          pesos(c.valorTotal),
+          i === 0 ? f.alertas.join(" | ") : "",
+          textoEstado,
+        ]),
+      );
       // Con filtro de empleado, el archivo lleva su identificación para no confundirlo con el general.
-      const sufijo = empleadoId && datos[0] ? `_${datos[0].identificacion.replace(/[^\w-]/g, "")}` : "";
+      const sufijo =
+        (empleadoId && datos[0] ? `_${datos[0].identificacion.replace(/[^\w-]/g, "")}` : "") +
+        (sucursalId && porCentroCosto[0]?.codigo ? `_cc-${porCentroCosto[0].codigo.replace(/[^\w-]/g, "")}` : "");
       reply
         .header("Content-Type", "text/csv; charset=utf-8")
         .header("Content-Disposition", `attachment; filename="liquidacion${sufijo}_${desde}_${hasta}.csv"`);
       return aCsv([encabezado, ...cuerpo]);
     }
-    return { desde, hasta, datos, totales, pendientes: resumenPendientes, cierre };
+    return { desde, hasta, datos, totales, porCentroCosto, pendientes: resumenPendientes, cierre };
   });
 
   /**
@@ -227,7 +326,7 @@ export const rutasReportes: Rutas = (app, { db, env }) => {
     "/extras-diarias",
     { onRequest: requiereSesion(), schema: { querystring: rango.extend({ formato: z.enum(["json", "xlsx"]).default("json") }) } },
     async (req, reply) => {
-      const { desde, hasta, empleadoId, formato } = req.query;
+      const { desde, hasta, empleadoId, sucursalId, formato } = req.query;
       if (hasta < desde) throw solicitudInvalida("El rango de fechas es inválido.");
       const minCat = (cats: Categoria[]) =>
         sql<number>`coalesce(sum(${liquidacionLineas.minutos}) filter (where ${liquidacionLineas.categoria} in (${sql.join(
@@ -244,6 +343,8 @@ export const rutasReportes: Rutas = (app, { db, env }) => {
           entrada: sql<string>`to_char(${marcaciones.entrada} at time zone 'America/Bogota', 'HH24:MI')`,
           salida: sql<string | null>`to_char(${marcaciones.salida} at time zone 'America/Bogota', 'HH24:MI')`,
           salidaAutomatica: marcaciones.salidaAutomatica,
+          codigoCentro: sucursales.codigo,
+          centro: sucursales.nombre,
           minDiurnas: minCat(["EXT_DIURNA"]),
           minNocturnas: minCat(["EXT_NOCTURNA"]),
           minFestivas: minCat(["EXT_DIURNA_DF", "EXT_NOCTURNA_DF"]),
@@ -252,15 +353,17 @@ export const rutasReportes: Rutas = (app, { db, env }) => {
         .from(marcaciones)
         .innerJoin(empleados, eq(empleados.id, marcaciones.empleadoId))
         .leftJoin(liquidacionLineas, eq(liquidacionLineas.marcacionId, marcaciones.id))
+        .leftJoin(sucursales, eq(sucursales.id, marcaciones.sucursalId))
         .where(
           and(
             eq(marcaciones.estado, "CERRADA"),
             gte(marcaciones.entrada, desdeLocal(desde)),
             lt(marcaciones.entrada, desdeLocal(sumarDias(hasta, 1))),
             empleadoId ? eq(marcaciones.empleadoId, empleadoId) : undefined,
+            sucursalId ? eq(marcaciones.sucursalId, sucursalId) : undefined,
           ),
         )
-        .groupBy(marcaciones.id, empleados.id)
+        .groupBy(marcaciones.id, empleados.id, sucursales.id)
         .orderBy(asc(sql`lower(${empleados.nombre} || ' ' || ${empleados.apellido})`), asc(marcaciones.entrada));
 
       const datos: FilaExtrasDiarias[] = filas.filter((f) => f.minDiurnas + f.minNocturnas + f.minFestivas + f.minPendientes > 0);
@@ -274,8 +377,10 @@ export const rutasReportes: Rutas = (app, { db, env }) => {
       };
 
       if (formato === "xlsx") {
-        const libro = libroExtrasDiarias({ desde, hasta, empresa: ctxEmpresa(), filas: datos });
-        const sufijo = empleadoId && datos[0] ? `_${datos[0].identificacion.replace(/[^\w-]/g, "")}` : "";
+        const libro = libroExtrasDiarias({ desde, hasta, empresa: await nombreEmpresa(db, env.EMPRESA_NOMBRE), filas: datos });
+        const sufijo =
+          (empleadoId && datos[0] ? `_${datos[0].identificacion.replace(/[^\w-]/g, "")}` : "") +
+          (sucursalId && datos[0]?.codigoCentro ? `_cc-${datos[0].codigoCentro.replace(/[^\w-]/g, "")}` : "");
         reply
           .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
           .header("Content-Disposition", `attachment; filename="horas-extra-diarias${sufijo}_${desde}_${hasta}.xlsx"`);

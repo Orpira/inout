@@ -2,9 +2,9 @@ import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../db/client.js";
 import { marcasOffline } from "../db/schema.js";
 import { ErrorHttp } from "../errores.js";
-import type { ServicioMarcaciones } from "./marcaciones.js";
+import type { ContextoEntrada, ServicioMarcaciones } from "./marcaciones.js";
 
-export interface MarcaOfflineEntrada {
+export interface MarcaOfflineEntrada extends ContextoEntrada {
   /** UUID generado por el dispositivo al capturar la marca. */
   id: string;
   codigo: string;
@@ -63,7 +63,8 @@ export class ServicioOffline {
         dispositivo,
       };
       try {
-        const r = await this.marcaciones.marcar(m.codigo, { momento, offline: true });
+        // Sin conexión no se puede preguntar el turno: si el kiosko no lo pidió, la entrada usa el horario habitual.
+        const r = await this.marcaciones.marcar(m.codigo, { momento, offline: true, sucursalId: m.sucursalId, turno: m.turno, ubicacion: m.ubicacion });
         const fila = {
           ...base,
           estado: "APLICADA" as const,

@@ -36,6 +36,13 @@
       "when": 1794600594506,
       "tag": "0004_salida_automatica",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795010160828,
+      "tag": "0005_empresa_sucursales",
+      "breakpoints": true
     }
   ]
 }

@@ -1,13 +1,14 @@
 import { ETIQUETAS, sumarDias } from "@inout/core";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Plus, TriangleAlert } from "lucide-react";
+import { Download, MapPinOff, Plus, TriangleAlert } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router";
 import { CintaJornada, LeyendaCinta } from "../componentes/CintaJornada";
 import { Cargando, Dialogo, Encabezado, EstadoChip, MensajeError, Paginacion, useAviso, Vacio } from "../componentes/ui";
 import { api, descargar } from "../lib/api";
 import { aInputLocal, desdeInputLocal, duracion, fechaCorta, hora, hoyLocal, nombreCompleto, pesos } from "../lib/formato";
-import type { Empleado, EstadoMarcacion, MarcaOffline, Marcacion, MarcacionDetalle, Pagina } from "../lib/tipos";
+import { etiquetaSucursal, useEmpresa } from "../lib/sucursales";
+import type { Empleado, EstadoMarcacion, Horario, MarcaOffline, Marcacion, MarcacionDetalle, Pagina, Sucursal } from "../lib/tipos";
 
 const ORIGEN: Record<Marcacion["origen"], string> = {
   KIOSKO: "Kiosko",
@@ -78,6 +79,7 @@ export default function Marcaciones() {
     estado: (sp.get("estado") ?? "") as EstadoMarcacion | "AUTO" | "",
     q: sp.get("q") ?? "",
     extras: (sp.get("extras") ?? "") as "" | "CON" | "PENDIENTE" | "APROBADAS" | "RECHAZADAS",
+    sucursal: sp.get("sucursal") ?? "",
     pagina: Number(sp.get("pagina") ?? 1),
   };
   const fijar = (cambios: Record<string, string | number | boolean | null>) => {
@@ -94,6 +96,7 @@ export default function Marcaciones() {
   if (filtros.estado === "AUTO") qs.set("salidaAutomatica", "true");
   else if (filtros.estado) qs.set("estado", filtros.estado);
   if (filtros.q) qs.set("q", filtros.q);
+  if (filtros.sucursal) qs.set("sucursalId", filtros.sucursal);
   if (filtros.extras === "CON") qs.set("soloExtras", "true");
   else if (filtros.extras) qs.set("estadoExtras", filtros.extras);
 
@@ -110,6 +113,8 @@ export default function Marcaciones() {
   const modoAprobacion = filtros.extras === "PENDIENTE";
   const qsContadores = new URLSearchParams({ desde: filtros.desde, hasta: filtros.hasta });
   if (filtros.q) qsContadores.set("q", filtros.q);
+  if (filtros.sucursal) qsContadores.set("sucursalId", filtros.sucursal);
+  const sucursales = useEmpresa().data?.sucursales ?? [];
   const contadores = useQuery({
     queryKey: ["marcaciones", "contadores", qsContadores.toString()],
     queryFn: () => api<Contadores>(`/marcaciones/contadores?${qsContadores}`),
@@ -203,6 +208,19 @@ export default function Marcaciones() {
           <label className="etiqueta" htmlFor="f-q">Empleado</label>
           <input id="f-q" type="search" placeholder="Nombre o identificación" className="campo" defaultValue={filtros.q} onChange={(e) => fijar({ q: e.target.value })} />
         </div>
+        {sucursales.length > 0 && (
+          <div>
+            <label className="etiqueta" htmlFor="f-suc">Centro de costo</label>
+            <select id="f-suc" className="campo w-48" value={filtros.sucursal} onChange={(e) => fijar({ sucursal: e.target.value })}>
+              <option value="">Todos</option>
+              {sucursales.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {etiquetaSucursal(x)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="etiqueta" htmlFor="f-extras">Horas extra</label>
           <select id="f-extras" className="campo w-44" value={filtros.extras} onChange={(e) => fijar({ extras: e.target.value })}>
@@ -293,7 +311,16 @@ export default function Marcaciones() {
                       </button>
                       <div className="text-[0.82rem] text-tinta-tenue tabular-nums">{m.empleado.identificacion}</div>
                     </td>
-                    <td className="whitespace-nowrap">{fechaCorta(m.entrada)}</td>
+                    <td className="whitespace-nowrap">
+                      {fechaCorta(m.entrada)}
+                      {m.sucursal && (
+                        <div className="flex items-center gap-1 text-[0.8rem] text-tinta-tenue" title={m.turno ? `Turno elegido: ${m.turno}` : undefined}>
+                          {m.sucursal}
+                          {m.turno && <span className="font-semibold text-extra-oscuro">· {m.turno}</span>}
+                          {m.fueraDeSede && <MapPinOff size={13} className="text-alerta" aria-label={`Marcó a ${m.distanciaSedeMetros} m de la sede`} />}
+                        </div>
+                      )}
+                    </td>
                     <td className="tabular-nums">{hora(m.entrada)}</td>
                     <td className="whitespace-nowrap tabular-nums">
                       {m.salida ? hora(m.salida) : <span className="text-tinta-tenue">—</span>}
@@ -392,6 +419,33 @@ function DetalleMarcacion({ id }: { id: number }) {
           <p className="mt-2 text-[0.9rem] text-extra-oscuro">
             El empleado no marcó la salida: el sistema la puso con la hora de su horario. Si no es correcta, corrígela.
           </p>
+        )}
+        {(m.sucursal || m.turno || m.distanciaSedeMetros != null) && (
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-[0.92rem]">
+            {m.sucursal && (
+              <>
+                <dt className="text-tinta-suave">Centro de costo</dt>
+                <dd className="font-semibold">{m.sucursal}</dd>
+              </>
+            )}
+            {m.turno && (
+              <>
+                <dt className="text-tinta-suave">Turno elegido</dt>
+                <dd>
+                  <strong>{m.turno}</strong> <span className="text-tinta-suave">(cubriendo otra sucursal: rige la jornada de ese día)</span>
+                </dd>
+              </>
+            )}
+            {m.distanciaSedeMetros != null && (
+              <>
+                <dt className="text-tinta-suave">Ubicación</dt>
+                <dd className={m.fueraDeSede ? "font-semibold text-alerta" : ""}>
+                  {m.fueraDeSede ? "Fuera de la sede: " : "En la sede: "}a {m.distanciaSedeMetros < 1000 ? `${m.distanciaSedeMetros} m` : `${(m.distanciaSedeMetros / 1000).toFixed(1)} km`}
+                  {m.precisionMetros != null && <span className="font-normal text-tinta-suave"> (precisión ±{m.precisionMetros} m)</span>}
+                </dd>
+              </>
+            )}
+          </dl>
         )}
       </div>
 
@@ -753,6 +807,8 @@ function FormEditar({ m, onCancelar, onListo }: { m: MarcacionDetalle; onCancela
   const [entrada, setEntrada] = useState(entradaInicial);
   const [salida, setSalida] = useState(salidaInicial);
   const [observacion, setObservacion] = useState(m.observacion ?? "");
+  const [sucursalId, setSucursalId] = useState(m.sucursalId ? String(m.sucursalId) : "");
+  const [horarioId, setHorarioId] = useState(m.horarioId ? String(m.horarioId) : "");
   const [motivo, setMotivo] = useState("");
   const mut = useMutation({
     mutationFn: () =>
@@ -763,6 +819,8 @@ function FormEditar({ m, onCancelar, onListo }: { m: MarcacionDetalle; onCancela
           ...(entrada !== entradaInicial ? { entrada: desdeInputLocal(entrada) } : {}),
           ...(salida !== salidaInicial ? { salida: desdeInputLocal(salida) } : {}),
           observacion: observacion || null,
+          sucursalId: sucursalId ? Number(sucursalId) : null,
+          horarioId: horarioId ? Number(horarioId) : null,
           motivo,
         },
       }),
@@ -788,6 +846,7 @@ function FormEditar({ m, onCancelar, onListo }: { m: MarcacionDetalle; onCancela
         <label className="etiqueta" htmlFor="e-obs">Observaciones</label>
         <textarea id="e-obs" rows={2} className="campo" value={observacion} onChange={(e) => setObservacion(e.target.value)} />
       </div>
+      <CamposCentroCosto prefijo="e" sucursalId={sucursalId} onSucursal={setSucursalId} horarioId={horarioId} onHorario={setHorarioId} vacio="Sin centro de costo" />
       <div>
         <label className="etiqueta" htmlFor="e-mot">Motivo de la corrección</label>
         <input id="e-mot" required minLength={5} className="campo" placeholder="Ej.: el empleado olvidó marcar la salida" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
@@ -842,7 +901,10 @@ function FormNueva({ onListo }: { onListo: () => void }) {
   const [entrada, setEntrada] = useState("");
   const [salida, setSalida] = useState("");
   const [observacion, setObservacion] = useState("");
+  const [sucursalId, setSucursalId] = useState("");
+  const [horarioId, setHorarioId] = useState("");
   const [motivo, setMotivo] = useState("");
+  const base = emps.data?.datos.find((e) => String(e.id) === empleadoId)?.sucursal ?? null;
   const mut = useMutation({
     mutationFn: () =>
       api("/marcaciones", {
@@ -851,6 +913,9 @@ function FormNueva({ onListo }: { onListo: () => void }) {
           entrada: desdeInputLocal(entrada),
           salida: desdeInputLocal(salida),
           observacion: observacion || null,
+          // Sin elegir, el servidor usa la sucursal base del empleado.
+          ...(sucursalId ? { sucursalId: Number(sucursalId) } : {}),
+          horarioId: horarioId ? Number(horarioId) : null,
           motivo,
         },
       }),
@@ -894,6 +959,14 @@ function FormNueva({ onListo }: { onListo: () => void }) {
         <label className="etiqueta" htmlFor="n-obs">Observaciones</label>
         <textarea id="n-obs" rows={2} className="campo" value={observacion} onChange={(e) => setObservacion(e.target.value)} />
       </div>
+      <CamposCentroCosto
+        prefijo="n"
+        sucursalId={sucursalId}
+        onSucursal={setSucursalId}
+        horarioId={horarioId}
+        onHorario={setHorarioId}
+        vacio={base ? `Su sucursal base (${base})` : "Su sucursal base"}
+      />
       <div>
         <label className="etiqueta" htmlFor="n-mot">Motivo del registro manual</label>
         <input id="n-mot" required minLength={5} className="campo" placeholder="Ej.: el kiosko estaba fuera de servicio" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
@@ -903,5 +976,58 @@ function FormNueva({ onListo }: { onListo: () => void }) {
         {mut.isPending ? "Registrando…" : "Registrar marcación"}
       </button>
     </form>
+  );
+}
+
+/**
+ * Centro de costo y turno de una marcación hecha o corregida a mano. El turno solo hace falta si el
+ * empleado cubrió otra sucursal con un horario distinto al suyo: rige la jornada de ese día.
+ */
+function CamposCentroCosto({
+  prefijo,
+  sucursalId,
+  onSucursal,
+  horarioId,
+  onHorario,
+  vacio,
+}: {
+  prefijo: string;
+  sucursalId: string;
+  onSucursal: (v: string) => void;
+  horarioId: string;
+  onHorario: (v: string) => void;
+  vacio: string;
+}) {
+  const sucursales: Sucursal[] = useEmpresa().data?.sucursales ?? [];
+  const horarios = useQuery({ queryKey: ["horarios"], queryFn: () => api<{ datos: Horario[] }>("/horarios"), enabled: sucursales.length > 0 });
+  if (!sucursales.length) return null;
+  const turnos = (horarios.data?.datos ?? []).filter((h) => (h.activo || String(h.id) === horarioId) && (!sucursalId || !h.sucursalId || String(h.sucursalId) === sucursalId));
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div>
+        <label className="etiqueta" htmlFor={`${prefijo}-suc`}>Centro de costo</label>
+        <select id={`${prefijo}-suc`} className="campo" value={sucursalId} onChange={(e) => onSucursal(e.target.value)}>
+          <option value="">{vacio}</option>
+          {sucursales
+            .filter((x) => x.activa || String(x.id) === sucursalId)
+            .map((x) => (
+              <option key={x.id} value={x.id}>
+                {etiquetaSucursal(x)}
+              </option>
+            ))}
+        </select>
+      </div>
+      <div>
+        <label className="etiqueta" htmlFor={`${prefijo}-turno`}>Turno realizado</label>
+        <select id={`${prefijo}-turno`} className="campo" value={horarioId} onChange={(e) => onHorario(e.target.value)}>
+          <option value="">Su horario habitual</option>
+          {turnos.map((h) => (
+            <option key={h.id} value={h.id}>
+              {h.nombre}
+            </option>
+          ))}
+        </select>
+      </div>
+    </div>
   );
 }

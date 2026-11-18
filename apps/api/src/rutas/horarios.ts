@@ -29,6 +29,8 @@ const esquemaHorario = z.object({
     .nullable(),
   toleranciaMinutos: z.number().int().min(0).max(120).default(0),
   requiereAprobacion: z.boolean().default(false),
+  /** Sucursal del turno (null = cualquier sucursal). */
+  sucursalId: z.number().int().nullish().transform((v) => v ?? null),
   activo: z.boolean().default(true),
 });
 
