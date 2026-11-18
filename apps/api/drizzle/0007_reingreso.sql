@@ -1,0 +1,1 @@
+ALTER TABLE "marcaciones" ADD COLUMN "reingreso" boolean DEFAULT false NOT NULL;

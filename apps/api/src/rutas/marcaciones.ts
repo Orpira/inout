@@ -19,6 +19,7 @@ export const columnasMarcacion = {
   origen: marcaciones.origen,
   observacion: marcaciones.observacion,
   salidaAutomatica: marcaciones.salidaAutomatica,
+  reingreso: marcaciones.reingreso,
   minutosTotales: marcaciones.minutosTotales,
   minutosExtra: marcaciones.minutosExtra,
   minutosExtraCalculados: marcaciones.minutosExtraCalculados,
@@ -226,6 +227,12 @@ export const rutasMarcaciones: Rutas = (app, ctx) => {
     "/:id/anular",
     { onRequest: sesion, schema: { params: id, body: z.object({ motivo }) } },
     async (req) => ctx.marcaciones.anular(req.user.id, req.params.id, req.body.motivo),
+  );
+
+  r.post(
+    "/:id/aprobar-reingreso",
+    { onRequest: sesion, schema: { params: id, body: z.object({ motivo }) } },
+    async (req) => ctx.marcaciones.aprobarReingreso(req.user.id, req.params.id, req.body.motivo),
   );
 
   r.post(

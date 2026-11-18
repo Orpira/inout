@@ -68,6 +68,8 @@ export interface Marcacion {
   observacion: string | null;
   /** La salida la puso el sistema con la hora del horario porque el empleado no la marcó. */
   salidaAutomatica?: boolean;
+  /** Entrada marcada después de cerrar el turno del día: necesita la aprobación de un supervisor. */
+  reingreso?: boolean;
   minutosTotales: number | null;
   minutosExtra: number | null;
   minutosExtraCalculados: number | null;

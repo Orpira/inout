@@ -149,6 +149,8 @@ En **Horarios** se define la jornada de cada grupo (Ley 2101: máximo 6 días, d
 
 Todo lo trabajado en un día no laborable del horario (p. ej. el sábado de un administrativo) es hora extra. En festivos que caen en día laborable se aplica la jornada de ese día con recargo festivo. Los empleados sin horario usan la jornada legal de lunes a sábado.
 
+**Reingreso en el mismo día**: si un empleado ya cerró su turno del día y vuelve a marcar en la misma sucursal, el kiosko le avisa de que ya había cerrado y registra la nueva entrada como novedad. Al marcar la salida, ese tiempo queda **por revisar** y no se liquida hasta que un supervisor lo aprueba con motivo (o lo corrige o lo anula).
+
 Las extras **por aprobar** no entran en la liquidación hasta que un supervisor las aprueba (todas, una parte o ninguna, con motivo). Si después se corrigen las horas del turno, la aprobación se anula y vuelve a quedar pendiente.
 
 ## Kiosko y funcionamiento sin conexión

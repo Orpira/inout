@@ -120,6 +120,8 @@ export const marcaciones = pgTable(
     observacion: text("observacion"),
     /** La salida la puso el sistema con la hora del horario porque el empleado no la marcó. */
     salidaAutomatica: boolean("salida_automatica").notNull().default(false),
+    /** Entrada marcada después de cerrar el turno del mismo día en la misma sucursal: al cerrarse va a revisión y la aprueba un supervisor. */
+    reingreso: boolean("reingreso").notNull().default(false),
     /** Sucursal (centro de costo) donde se trabajó: a ella se imputan las horas en la liquidación. */
     sucursalId: integer("sucursal_id").references(() => sucursales.id, { onDelete: "restrict" }),
     /** Turno elegido al cubrir otra sucursal. NULL = el horario asignado al empleado. Rige la jornada de ese día. */
