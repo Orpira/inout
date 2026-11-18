@@ -113,6 +113,8 @@ export interface EventoAuditoria {
 export interface MarcacionDetalle extends Marcacion {
   lineas: LineaLiquidacion[];
   historial: EventoAuditoria[];
+  /** Si el turno cerrado se puede reabrir y, si no, por qué. */
+  reabrir?: { posible: boolean; impedimento: string | null };
 }
 
 export interface Pagina<T> {

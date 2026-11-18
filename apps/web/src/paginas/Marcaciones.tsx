@@ -396,7 +396,7 @@ function DetalleMarcacion({ id }: { id: number }) {
   const qc = useQueryClient();
   const aviso = useAviso();
   const q = useQuery({ queryKey: ["marcacion", id], queryFn: () => api<MarcacionDetalle>(`/marcaciones/${id}`) });
-  const [modo, setModo] = useState<"ver" | "editar" | "anular">("ver");
+  const [modo, setModo] = useState<"ver" | "editar" | "anular" | "reabrir">("ver");
 
   const refrescar = () => {
     void qc.invalidateQueries({ queryKey: ["marcaciones"] });
@@ -540,10 +540,26 @@ function DetalleMarcacion({ id }: { id: number }) {
           <button className="btn btn-primario" onClick={() => setModo("editar")}>
             {m.estado === "REVISION" || m.estado === "ABIERTA" ? "Registrar salida o corregir" : "Corregir horas"}
           </button>
+          {m.estado === "CERRADA" && m.reabrir?.posible && (
+            <button className="btn btn-secundario" onClick={() => setModo("reabrir")}>
+              Reabrir turno
+            </button>
+          )}
           <button className="btn btn-peligro" onClick={() => setModo("anular")}>
             Anular
           </button>
         </div>
+      )}
+      {modo === "reabrir" && (
+        <FormReabrir
+          m={m}
+          onCancelar={() => setModo("ver")}
+          onListo={() => {
+            refrescar();
+            setModo("ver");
+            aviso("Turno reabierto: el empleado puede marcar su salida real");
+          }}
+        />
       )}
       {modo === "editar" && (
         <FormEditar
@@ -595,6 +611,7 @@ const ACCIONES: Record<string, string> = {
   ANULAR: "Anulación",
   ENVIAR_REVISION: "Enviada a revisión",
   REINGRESO: "Reingreso en el mismo día",
+  REABRIR: "Turno reabierto",
   APROBAR_REINGRESO: "Reingreso aprobado",
   APROBAR_EXTRAS: "Horas extra aprobadas",
   RECHAZAR_EXTRAS: "Horas extra rechazadas",
@@ -906,6 +923,39 @@ function AprobarReingreso({ id, onListo }: { id: number; onListo: () => void }) 
       <button className="btn btn-primario" disabled={mut.isPending || motivo.trim().length < 5}>
         Aprobar reingreso
       </button>
+    </form>
+  );
+}
+
+/** Reabre un turno cerrado por error: se quita la salida y vuelve a quedar abierto. Todo queda en el historial. */
+function FormReabrir({ m, onCancelar, onListo }: { m: MarcacionDetalle; onCancelar: () => void; onListo: () => void }) {
+  const [motivo, setMotivo] = useState("");
+  const mut = useMutation({ mutationFn: () => api(`/marcaciones/${m.id}/reabrir`, { body: { motivo } }), onSuccess: onListo });
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        mut.mutate();
+      }}
+      className="space-y-3 rounded-[10px] border border-linea-fuerte bg-papel p-4"
+    >
+      <p className="text-[0.93rem]">
+        Se quitará la salida de las <strong>{m.salida ? hora(m.salida) : "—"}</strong> y el turno volverá a quedar abierto para que el empleado marque
+        su salida real en el kiosko. La salida anulada, el motivo y quién lo autoriza quedan en el historial.
+      </p>
+      <div>
+        <label className="etiqueta" htmlFor="ra-mot">Motivo de la reapertura</label>
+        <input id="ra-mot" required minLength={5} className="campo" placeholder="Ej.: marcó la salida por error al pasar por el kiosko" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+      </div>
+      <MensajeError error={mut.error} />
+      <div className="flex gap-2">
+        <button className="btn btn-primario" disabled={mut.isPending || motivo.trim().length < 5}>
+          Reabrir turno
+        </button>
+        <button type="button" className="btn btn-fantasma" onClick={onCancelar}>
+          Cancelar
+        </button>
+      </div>
     </form>
   );
 }

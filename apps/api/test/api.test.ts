@@ -444,6 +444,38 @@ describe("reingreso en el mismo día", () => {
   });
 });
 
+describe("reabrir un turno cerrado por error", () => {
+  it("quita la salida, deja el turno abierto y registra quién y por qué", async () => {
+    await crearEmpleado({ identificacion: "3002" });
+    const marcar = () => app.inject({ method: "POST", url: "/api/kiosko/marcar", payload: { codigo: "3002" } });
+    await marcar();
+    const cerrada = (await marcar()).json().marcacion;
+    const det = (await api("GET", `/api/marcaciones/${cerrada.id}`)).json();
+    expect(det.reabrir.posible).toBe(true);
+    expect((await api("POST", `/api/marcaciones/${cerrada.id}/reabrir`, { motivo: "x" }, cookieSup)).statusCode).toBe(400);
+    const r = await api("POST", `/api/marcaciones/${cerrada.id}/reabrir`, { motivo: "Marcó la salida por error" }, cookieSup);
+    expect(r.statusCode).toBe(200);
+    expect(r.json().estado).toBe("ABIERTA");
+    expect(r.json().salida).toBeNull();
+    const tras = (await api("GET", `/api/marcaciones/${cerrada.id}`)).json();
+    const evento = tras.historial.find((h: { accion: string }) => h.accion === "REABRIR");
+    expect(evento.motivo).toBe("Marcó la salida por error");
+    expect(evento.usuario).toBe("Sup");
+    expect(evento.antes.salida).not.toBeNull();
+    expect(tras.lineas).toHaveLength(0);
+    // La siguiente marcación del kiosko es la salida real del mismo turno (no un reingreso).
+    const salida = (await marcar()).json();
+    expect(salida.tipo).toBe("SALIDA");
+    expect(salida.marcacion.id).toBe(cerrada.id);
+    expect(salida.aviso).toBeNull();
+    // Con un registro posterior ya no se puede reabrir el anterior.
+    await marcar();
+    const otra = (await api("GET", `/api/marcaciones/${cerrada.id}`)).json();
+    expect(otra.reabrir.posible).toBe(false);
+    expect((await api("POST", `/api/marcaciones/${cerrada.id}/reabrir`, { motivo: "Marcó la salida por error" })).statusCode).toBe(409);
+  });
+});
+
 describe("kiosko sin conexión", () => {
   const uuid = () => crypto.randomUUID();
   const sincronizar = (marcas: { id: string; codigo: string; capturadoEn: string }[], enviadoEn = new Date()) =>

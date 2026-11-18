@@ -282,6 +282,68 @@ export class ServicioMarcaciones {
     return r!;
   }
 
+  /**
+   * Por qué no se puede reabrir un turno cerrado (null = se puede). Solo se reabre el último turno del
+   * empleado, dentro de MAX_HORAS_TURNO desde su entrada y sin otro turno abierto.
+   */
+  async impedimentoReabrir(tx: DbTx, m: Marcacion): Promise<string | null> {
+    if (m.estado !== "CERRADA" || !m.salida) return "Solo se puede reabrir un turno cerrado.";
+    if (Date.now() - m.entrada.getTime() > this.env.MAX_HORAS_TURNO * 3_600_000) {
+      return `Solo se puede reabrir dentro de las ${this.env.MAX_HORAS_TURNO} h siguientes a la entrada. Corrige las horas en su lugar.`;
+    }
+    const [otra] = await tx
+      .select({ id: marcaciones.id, estado: marcaciones.estado })
+      .from(marcaciones)
+      .where(
+        and(
+          eq(marcaciones.empleadoId, m.empleadoId),
+          ne(marcaciones.id, m.id),
+          ne(marcaciones.estado, "ANULADA"),
+          or(gte(marcaciones.entrada, m.entrada), eq(marcaciones.estado, "ABIERTA")),
+        ),
+      )
+      .limit(1);
+    if (otra) {
+      return otra.estado === "ABIERTA"
+        ? "El empleado tiene otro turno abierto. Ciérralo o anúlalo antes de reabrir este."
+        : "El empleado tiene un registro posterior. Anúlalo o corrígelo antes de reabrir este turno.";
+    }
+    return null;
+  }
+
+  /**
+   * Reabre un turno cerrado por equivocación: se quita la salida y vuelve a quedar abierto para que el
+   * empleado marque su salida real. La salida anulada, el motivo y quién lo autorizó quedan en el historial.
+   */
+  async reabrir(usuarioId: number, id: number, motivo: string) {
+    return this.db.transaction(async (tx) => {
+      const [previa] = await tx.select().from(marcaciones).where(eq(marcaciones.id, id));
+      if (!previa) throw noEncontrado("Marcación");
+      await tx.execute(sql`select pg_advisory_xact_lock(${previa.empleadoId})`);
+      const [m] = await tx.select().from(marcaciones).where(eq(marcaciones.id, id));
+      const impedimento = await this.impedimentoReabrir(tx, m!);
+      if (impedimento) throw conflicto(impedimento, "NO_REABRIBLE");
+      await exigirPeriodoAbierto(tx, fechaLocal(m!.entrada));
+      await tx
+        .update(marcaciones)
+        .set({
+          salida: null,
+          estado: "ABIERTA",
+          salidaAutomatica: false,
+          estadoExtras: null,
+          minutosExtraAprobados: null,
+          extrasRevisadasPor: null,
+          extrasRevisadasEn: null,
+          observacion: añadir(m!.observacion, `Turno reabierto: se anuló la salida de las ${horaTexto(m!.salida!)}. Motivo: ${motivo}`),
+        })
+        .where(eq(marcaciones.id, id));
+      await this.recalcularDia(tx, m!.empleadoId, fechaLocal(m!.entrada));
+      const [actual] = await tx.select().from(marcaciones).where(eq(marcaciones.id, id));
+      await this.auditar(tx, usuarioId, id, "REABRIR", motivo, instantanea(m!), instantanea(actual!));
+      return actual!;
+    });
+  }
+
   /** El supervisor acepta un reingreso: el turno pasa a cerrado y se liquida. */
   async aprobarReingreso(usuarioId: number, id: number, motivo: string) {
     return this.db.transaction(async (tx) => {
