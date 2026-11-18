@@ -7,6 +7,7 @@ import { Cargando, Dialogo, Encabezado, MensajeError, useAviso, Vacio } from "..
 import { api } from "../lib/api";
 import { duracion, hoyLocal, nombreCompleto, pesos } from "../lib/formato";
 import { useSesion } from "../lib/sesion";
+import { etiquetaSucursal, useEmpresa } from "../lib/sucursales";
 import type { Empleado, Horario } from "../lib/tipos";
 
 export default function Empleados() {
@@ -20,6 +21,7 @@ export default function Empleados() {
     queryFn: () => api<{ datos: Empleado[] }>(`/empleados?estado=${estado}&q=${encodeURIComponent(q)}`),
   });
   const jornadaLegal = minutosOrdinariosPorDefecto(hoyLocal());
+  const hayCentros = (useEmpresa().data?.sucursales.length ?? 0) > 0;
 
   return (
     <div>
@@ -69,6 +71,7 @@ export default function Empleados() {
                 <th>Cargo</th>
                 <th className="num">Salario</th>
                 <th>Horario</th>
+                {hayCentros && <th>Sucursal base</th>}
                 <th>Estado</th>
               </tr>
             </thead>
@@ -80,6 +83,7 @@ export default function Empleados() {
                   <td className="text-tinta-suave">{e.cargo ?? "—"}</td>
                   <td className="num">{pesos(e.salario)}</td>
                   <td>{e.horario ?? <span className="text-tinta-tenue">Jornada legal L-S ({duracion(jornadaLegal)})</span>}</td>
+                  {hayCentros && <td>{e.sucursal ?? <span className="text-tinta-tenue">Sin asignar</span>}</td>}
                   <td>
                     {!e.activo ? (
                       <span className="text-tinta-tenue">Inactivo</span>
@@ -117,11 +121,13 @@ function FormEmpleado({ empleado, onListo, jornadaLegal }: { empleado: Empleado 
     telefono: empleado?.telefono ?? "",
     salario: empleado ? String(empleado.salario) : "",
     horarioId: empleado?.horarioId ? String(empleado.horarioId) : "",
+    sucursalId: empleado?.sucursalId ? String(empleado.sucursalId) : "",
     fechaIngreso: empleado?.fechaIngreso ?? "",
     activo: empleado?.activo ?? true,
     motivo: "",
   });
   const horarios = useQuery({ queryKey: ["horarios"], queryFn: () => api<{ datos: Horario[] }>("/horarios") });
+  const sucursales = useEmpresa().data?.sucursales ?? [];
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value });
 
   const mut = useMutation({
@@ -132,6 +138,7 @@ function FormEmpleado({ empleado, onListo, jornadaLegal }: { empleado: Empleado 
         ...(empleado ? { motivo } : {}),
         salario: Number(f.salario),
         horarioId: f.horarioId ? Number(f.horarioId) : null,
+        sucursalId: f.sucursalId ? Number(f.sucursalId) : null,
       };
       return empleado ? api(`/empleados/${empleado.id}`, { method: "PUT", body }) : api("/empleados", { body });
     },
@@ -169,6 +176,22 @@ function FormEmpleado({ empleado, onListo, jornadaLegal }: { empleado: Empleado 
           </select>
           <p className="mt-1 text-[0.8rem] text-tinta-tenue">Define la jornada ordinaria, el descanso y si sus extras requieren aprobación.</p>
         </div>
+        {sucursales.length > 0 && (
+          <div>
+            <label className="etiqueta" htmlFor="sucursal">Sucursal base (centro de costo)</label>
+            <select id="sucursal" className="campo" value={f.sucursalId} onChange={set("sucursalId")}>
+              <option value="">Sin asignar</option>
+              {sucursales
+                .filter((s) => s.activa || String(s.id) === f.sucursalId)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {etiquetaSucursal(s)}
+                  </option>
+                ))}
+            </select>
+            <p className="mt-1 text-[0.8rem] text-tinta-tenue">Puede cubrir turnos en otras: el kiosko le pedirá cuál.</p>
+          </div>
+        )}
         <Campo id="email" etiqueta="Correo" valor={f.email} onChange={set("email")} tipo="email" />
         <Campo id="telefono" etiqueta="Teléfono" valor={f.telefono} onChange={set("telefono")} />
         <Campo id="fechaIngreso" etiqueta="Fecha de ingreso" valor={f.fechaIngreso} onChange={set("fechaIngreso")} tipo="date" />

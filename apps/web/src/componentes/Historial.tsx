@@ -37,6 +37,15 @@ const CAMPOS: Record<string, string> = {
   descanso: "Descanso",
   toleranciaMinutos: "Tolerancia (min)",
   requiereAprobacion: "Requiere aprobación",
+  sucursalId: "Sucursal",
+  codigo: "Código",
+  nit: "NIT",
+  ciudad: "Ciudad",
+  direccion: "Dirección",
+  latitud: "Latitud",
+  longitud: "Longitud",
+  radioMetros: "Radio (m)",
+  activa: "Activa",
 };
 
 function valor(campo: string, v: unknown): string {
@@ -48,7 +57,7 @@ function valor(campo: string, v: unknown): string {
 }
 
 /** Historial de cambios auditados de un empleado, un horario o los festivos. */
-export function HistorialCambios({ entidad, entidadId }: { entidad: "empleado" | "horario" | "festivo"; entidadId?: number }) {
+export function HistorialCambios({ entidad, entidadId }: { entidad: "empleado" | "horario" | "festivo" | "empresa" | "sucursal"; entidadId?: number }) {
   const q = useQuery({
     queryKey: ["auditoria", entidad, entidadId],
     queryFn: () => api<{ datos: Evento[] }>(`/config/auditoria?entidad=${entidad}${entidadId ? `&entidadId=${entidadId}` : ""}`),

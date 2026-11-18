@@ -11,6 +11,8 @@ export interface FilaExtrasDiarias {
   entrada: string;
   salida: string | null;
   salidaAutomatica: boolean;
+  codigoCentro: string | null;
+  centro: string | null;
   minDiurnas: number;
   minNocturnas: number;
   minFestivas: number;
@@ -52,6 +54,7 @@ export function libroExtrasDiarias({ desde, hasta, empresa, filas }: { desde: st
     { key: "nocturnas", width: 12 },
     { key: "festivas", width: 12 },
     { key: "pendientes", width: 14 },
+    { key: "centro", width: 26 },
   ];
 
   const etiqueta = (celda: string, texto: string, valor: Date) => {
@@ -68,7 +71,7 @@ export function libroExtrasDiarias({ desde, hasta, empresa, filas }: { desde: st
   hoja.getCell("C1").font = { bold: true };
   hoja.getCell("C2").value = "Reporte horas extra, mensual";
 
-  const titulos = ["Fecha", "Empleado", "Cédula", "Hora ing.", "Hora sal.", "Ext. diurnas", "Ext. nocturnas", "Ext. festivos", "Por aprobar"];
+  const titulos = ["Fecha", "Empleado", "Cédula", "Hora ing.", "Hora sal.", "Ext. diurnas", "Ext. nocturnas", "Ext. festivos", "Por aprobar", "Centro de costo"];
   const cab = hoja.getRow(4);
   cab.values = titulos;
   cab.height = 32;
@@ -91,6 +94,7 @@ export function libroExtrasDiarias({ desde, hasta, empresa, filas }: { desde: st
       horas(f.minNocturnas),
       horas(f.minFestivas),
       f.minPendientes ? horas(f.minPendientes) : null,
+      f.centro ? (f.codigoCentro ? `${f.codigoCentro} · ${f.centro}` : f.centro) : null,
     ];
     // [$-240A] = español de Colombia: el día sale en español aunque Excel esté en otro idioma.
     fila.getCell(1).numFmt = '[$-240A]dddd", "dd/mm/yyyy';

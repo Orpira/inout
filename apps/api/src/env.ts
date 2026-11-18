@@ -16,7 +16,7 @@ const esquema = z.object({
   ANTIREBOTE_SEGUNDOS: z.coerce.number().min(0).default(60),
   /** Horas hacia atrás aceptadas para marcaciones capturadas sin conexión. */
   MAX_HORAS_OFFLINE: z.coerce.number().min(0).default(168),
-  /** Razón social que encabeza los reportes en Excel (p. ej. "SISTEMAS LOGÍSTICOS INDUSTRIALES SAS"). */
+  /** Razón social de respaldo para los reportes mientras no se defina en la pantalla "Empresa y sucursales". */
   EMPRESA_NOMBRE: z.string().optional(),
   /** Ruta al build del frontend para servirlo desde la API (opcional). */
   WEB_DIST: z.string().optional(),

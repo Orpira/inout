@@ -7,6 +7,7 @@ import {
   horarios,
   liquidacionLineas,
   marcaciones,
+  sucursales,
   type Empleado,
   type Marcacion,
 } from "../db/schema.js";
@@ -16,6 +17,31 @@ import type { ServicioCalendario } from "./calendario.js";
 import { exigirPeriodoAbierto, periodosVigentes } from "./periodos.js";
 
 export type TipoMarca = "ENTRADA" | "SALIDA";
+
+/** Datos de dónde y con qué turno se registra una entrada desde el kiosko. */
+export interface ContextoEntrada {
+  /** Sucursal del kiosko. Si falta, la sucursal base del empleado. */
+  sucursalId?: number | null;
+  /** Turno elegido por el empleado al marcar en una sucursal que no es la suya (null = su horario habitual). */
+  turno?: { horarioId: number | null } | null;
+  ubicacion?: { latitud: number; longitud: number; precisionMetros?: number | null } | null;
+}
+
+export interface OpcionTurno {
+  /** null = el horario habitual del empleado. */
+  horarioId: number | null;
+  nombre: string;
+  habitual: boolean;
+}
+
+/** Distancia en metros entre dos coordenadas (haversine). */
+export function distanciaMetros(a: { latitud: number; longitud: number }, b: { latitud: number; longitud: number }) {
+  const rad = (g: number) => (g * Math.PI) / 180;
+  const dLat = rad(b.latitud - a.latitud);
+  const dLon = rad(b.longitud - a.longitud);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.latitud)) * Math.cos(rad(b.latitud)) * Math.sin(dLon / 2) ** 2;
+  return Math.round(2 * 6_371_000 * Math.asin(Math.sqrt(h)));
+}
 
 export interface ResultadoMarca {
   tipo: TipoMarca;
@@ -38,6 +64,8 @@ const instantanea = (m: Marcacion) => ({
   salida: m.salida?.toISOString() ?? null,
   estado: m.estado,
   observacion: m.observacion,
+  sucursalId: m.sucursalId,
+  horarioId: m.horarioId,
 });
 
 export class ServicioMarcaciones {
@@ -47,10 +75,14 @@ export class ServicioMarcaciones {
     private readonly env: Pick<Env, "MAX_HORAS_TURNO" | "ANTIREBOTE_SEGUNDOS" | "MAX_HORAS_OFFLINE">,
   ) {}
 
-  /** Horario asignado al empleado o, si no tiene, la jornada legal de lunes a sábado. */
-  private async horarioDe(tx: DbTx, empleado: Pick<Empleado, "horarioId">, fecha: string): Promise<Horario> {
-    if (empleado.horarioId) {
-      const [h] = await tx.select().from(horarios).where(eq(horarios.id, empleado.horarioId));
+  /**
+   * Turno elegido en la marcación (al cubrir otra sucursal) o, si no hay, el horario asignado al empleado;
+   * sin ninguno, la jornada legal de lunes a sábado.
+   */
+  private async horarioDe(tx: DbTx, empleado: Pick<Empleado, "horarioId">, fecha: string, horarioMarcacion?: number | null): Promise<Horario> {
+    const id = horarioMarcacion ?? empleado.horarioId;
+    if (id) {
+      const [h] = await tx.select().from(horarios).where(eq(horarios.id, id));
       if (h) return h;
     }
     return horarioLegalPorDefecto(fecha);
@@ -61,10 +93,10 @@ export class ServicioMarcaciones {
    * - `vencida`: lleva más de MAX_HORAS_TURNO sin salida. El sistema lo cierra solo y la marcación es una entrada nueva.
    * - `salidaProgramada`: hora con la que se cierra (null = sin referencia en el horario; va a revisión).
    */
-  async situacionAbierta(tx: DbTx, empleado: Pick<Empleado, "horarioId">, abierta: Pick<Marcacion, "entrada">, momento = new Date()) {
+  async situacionAbierta(tx: DbTx, empleado: Pick<Empleado, "horarioId">, abierta: Pick<Marcacion, "entrada"> & Partial<Pick<Marcacion, "horarioId">>, momento = new Date()) {
     return {
       entrada: abierta.entrada,
-      salidaProgramada: salidaProgramada(await this.horarioDe(tx, empleado, fechaLocal(abierta.entrada)), abierta.entrada),
+      salidaProgramada: salidaProgramada(await this.horarioDe(tx, empleado, fechaLocal(abierta.entrada), abierta.horarioId), abierta.entrada),
       vencida: momento.getTime() - abierta.entrada.getTime() > this.env.MAX_HORAS_TURNO * 3_600_000,
     };
   }
@@ -76,7 +108,7 @@ export class ServicioMarcaciones {
       .where(and(eq(empleados.identificacion, codigo.trim()), eq(empleados.activo, true)));
     if (!e) throw noEncontrado("Empleado");
     const [abierta] = await this.db
-      .select({ entrada: marcaciones.entrada })
+      .select({ entrada: marcaciones.entrada, horarioId: marcaciones.horarioId })
       .from(marcaciones)
       .where(and(eq(marcaciones.empleadoId, e.id), eq(marcaciones.estado, "ABIERTA")));
     const situacion = abierta ? await this.situacionAbierta(this.db, e, abierta) : null;
@@ -89,12 +121,55 @@ export class ServicioMarcaciones {
   }
 
   /**
+   * Si la próxima marcación del empleado es una entrada en una sucursal que no es la suya,
+   * devuelve los turnos que puede elegir; si no hay nada que elegir, null.
+   */
+  async turnoParaEntrada(codigo: string, sucursalId: number | null | undefined, momento = new Date()) {
+    if (!sucursalId) return null;
+    const [e] = await this.db
+      .select()
+      .from(empleados)
+      .where(and(eq(empleados.identificacion, codigo.trim()), eq(empleados.activo, true)));
+    if (!e || !e.sucursalId || e.sucursalId === sucursalId) return null;
+    const [abierta] = await this.db
+      .select({ entrada: marcaciones.entrada, horarioId: marcaciones.horarioId })
+      .from(marcaciones)
+      .where(and(eq(marcaciones.empleadoId, e.id), eq(marcaciones.estado, "ABIERTA")));
+    if (abierta && !(await this.situacionAbierta(this.db, e, abierta, momento)).vencida) return null; // es una salida
+    const [suc] = await this.db.select().from(sucursales).where(eq(sucursales.id, sucursalId));
+    const [base] = await this.db.select({ nombre: sucursales.nombre }).from(sucursales).where(eq(sucursales.id, e.sucursalId));
+    if (!suc) return null;
+    return {
+      empleado: resumenEmpleado(e),
+      sucursal: { id: suc.id, nombre: suc.nombre },
+      sucursalBase: base?.nombre ?? null,
+      opciones: await this.opcionesTurno(this.db, e, sucursalId),
+    };
+  }
+
+  /** Turnos de la sucursal (o, si no tiene propios, los generales) más el horario habitual del empleado. */
+  async opcionesTurno(tx: DbTx, e: Pick<Empleado, "horarioId">, sucursalId: number): Promise<OpcionTurno[]> {
+    const activos = await tx
+      .select({ id: horarios.id, nombre: horarios.nombre, sucursalId: horarios.sucursalId })
+      .from(horarios)
+      .where(eq(horarios.activo, true))
+      .orderBy(asc(horarios.nombre));
+    const propios = activos.filter((h) => h.sucursalId === sucursalId);
+    const candidatos = (propios.length ? propios : activos.filter((h) => h.sucursalId === null)).filter((h) => h.id !== e.horarioId);
+    const habitual = e.horarioId ? activos.find((h) => h.id === e.horarioId) : null;
+    return [
+      ...candidatos.map((h) => ({ horarioId: h.id, nombre: h.nombre, habitual: false })),
+      { horarioId: null, nombre: habitual ? `Mi turno habitual (${habitual.nombre})` : "Mi turno habitual (jornada legal)", habitual: true },
+    ];
+  }
+
+  /**
    * Marcación desde el kiosko: abre o cierra el turno según el estado actual.
    * Si el turno abierto lleva más de MAX_HORAS_TURNO sin salida, se cierra con la hora del horario
    * y esta marcación es una entrada nueva.
    * `momento` permite sincronizar marcaciones capturadas sin conexión.
    */
-  async marcar(codigo: string, opciones: { momento?: Date; offline?: boolean } = {}): Promise<ResultadoMarca> {
+  async marcar(codigo: string, opciones: { momento?: Date; offline?: boolean } & ContextoEntrada = {}): Promise<ResultadoMarca> {
     const ahora = new Date();
     const momento = opciones.momento ?? ahora;
     if (opciones.momento) {
@@ -133,7 +208,7 @@ export class ServicioMarcaciones {
         if (sit.vencida) {
           // Turno olvidado: se cierra con la hora del horario (o va a revisión si no hay referencia) y se abre uno nuevo.
           const aviso = await this.cerrarOlvidada(tx, abierta, sit.salidaProgramada, `Sin salida registrada en ${this.env.MAX_HORAS_TURNO} h`);
-          const nueva = await this.crearEntrada(tx, empleado.id, momento, origen);
+          const nueva = await this.crearEntrada(tx, empleado, momento, origen, opciones);
           return { tipo: "ENTRADA", marcacion: nueva, empleado: resumenEmpleado(empleado), aviso };
         }
         const cerrada = await this.cerrar(tx, abierta, momento);
@@ -167,7 +242,7 @@ export class ServicioMarcaciones {
       if (ultima?.salida && momento.getTime() < ultima.salida.getTime()) {
         throw conflicto("La marcación es anterior a tu última salida registrada.");
       }
-      const nueva = await this.crearEntrada(tx, empleado.id, momento, origen);
+      const nueva = await this.crearEntrada(tx, empleado, momento, origen, opciones);
       return { tipo: "ENTRADA", marcacion: nueva, empleado: resumenEmpleado(empleado) };
     });
   }
@@ -203,10 +278,37 @@ export class ServicioMarcaciones {
     return `Tu turno anterior no tenía salida: se cerró con la hora de tu horario (${horaTexto(salida)}). Si no es correcta, avisa a tu supervisor.`;
   }
 
-  private async crearEntrada(tx: DbTx, empleadoId: number, entrada: Date, origen: Marcacion["origen"]) {
+  private async crearEntrada(tx: DbTx, empleado: Empleado, entrada: Date, origen: Marcacion["origen"], ctx: ContextoEntrada = {}) {
     await exigirPeriodoAbierto(tx, fechaLocal(entrada));
-    const [m] = await tx.insert(marcaciones).values({ empleadoId, entrada, origen, estado: "ABIERTA" }).returning();
+    const destino = await this.destinoEntrada(tx, empleado, ctx);
+    const [m] = await tx.insert(marcaciones).values({ empleadoId: empleado.id, entrada, origen, estado: "ABIERTA", ...destino }).returning();
     return m!;
+  }
+
+  /**
+   * Sucursal, turno y ubicación de una entrada. Nunca rechaza: una sucursal o un turno que ya no existen
+   * se ignoran, para que las marcaciones guardadas sin conexión siempre se puedan aplicar.
+   */
+  private async destinoEntrada(tx: DbTx, empleado: Empleado, ctx: ContextoEntrada) {
+    let sucursal = null as (typeof sucursales.$inferSelect) | null;
+    const sucursalId = ctx.sucursalId ?? empleado.sucursalId;
+    if (sucursalId) [sucursal = null] = await tx.select().from(sucursales).where(eq(sucursales.id, sucursalId));
+    let horarioId: number | null = null;
+    if (ctx.turno?.horarioId && sucursal && sucursal.id !== empleado.sucursalId) {
+      const [h] = await tx.select({ id: horarios.id }).from(horarios).where(eq(horarios.id, ctx.turno.horarioId));
+      horarioId = h?.id ?? null;
+    }
+    const u = ctx.ubicacion;
+    const distancia =
+      u && sucursal?.latitud != null && sucursal.longitud != null ? distanciaMetros(u, { latitud: sucursal.latitud, longitud: sucursal.longitud }) : null;
+    return {
+      sucursalId: sucursal?.id ?? null,
+      horarioId,
+      latitud: u?.latitud ?? null,
+      longitud: u?.longitud ?? null,
+      precisionMetros: u?.precisionMetros != null ? Math.round(u.precisionMetros) : null,
+      distanciaSedeMetros: distancia,
+    };
   }
 
   private async cerrar(tx: DbTx, m: Marcacion, salida: Date): Promise<Marcacion> {
@@ -234,7 +336,6 @@ export class ServicioMarcaciones {
       .where(eq(empleados.id, empleadoId));
     if (!fila) throw noEncontrado("Empleado");
     const { empleado } = fila;
-    const horario: Horario = fila.horario ?? horarioLegalPorDefecto(fecha);
     const calendario = await this.calendario.obtener(tx);
     const delDia = await tx
       .select()
@@ -252,6 +353,9 @@ export class ServicioMarcaciones {
       await tx.delete(liquidacionLineas).where(inArray(liquidacionLineas.marcacionId, delDia.map((m) => m.id)));
     }
 
+    // El turno elegido al cubrir otra sucursal rige la jornada de todo ese día.
+    const turnoElegido = delDia.find((m) => m.estado !== "ANULADA" && m.horarioId)?.horarioId;
+    const horario: Horario = turnoElegido ? await this.horarioDe(tx, empleado, fecha, turnoElegido) : (fila.horario ?? horarioLegalPorDefecto(fecha));
     const cerradas = delDia.filter((m) => m.estado === "CERRADA" && m.salida);
     const limite = minutosOrdinariosHorario(horario, diaSemana(fecha));
     // Una pausa por duración solo se descuenta si el día tiene un único turno;
@@ -421,6 +525,19 @@ export class ServicioMarcaciones {
     return { recalculados, omitidos };
   }
 
+  /** Sucursal y turno indicados a mano: deben existir. */
+  private async validarDestino(tx: DbTx, sucursalId: number | null | undefined, horarioId: number | null) {
+    if (sucursalId) {
+      const [s] = await tx.select({ id: sucursales.id }).from(sucursales).where(eq(sucursales.id, sucursalId));
+      if (!s) throw solicitudInvalida("La sucursal indicada no existe.");
+    }
+    if (horarioId) {
+      const [h] = await tx.select({ id: horarios.id }).from(horarios).where(eq(horarios.id, horarioId));
+      if (!h) throw solicitudInvalida("El turno indicado no existe.");
+    }
+    return { sucursalId: sucursalId ?? null, horarioId };
+  }
+
   private async validarSolape(tx: DbTx, empleadoId: number, entrada: Date, salida: Date | null, excluirId?: number) {
     const fin = salida ?? new Date("9999-12-31T00:00:00Z");
     const [choque] = await tx
@@ -443,7 +560,7 @@ export class ServicioMarcaciones {
 
   async crearManual(
     usuarioId: number,
-    datos: { empleadoId: number; entrada: Date; salida: Date | null; observacion?: string | null; motivo: string },
+    datos: { empleadoId: number; entrada: Date; salida: Date | null; observacion?: string | null; sucursalId?: number | null; horarioId?: number | null; motivo: string },
   ) {
     if (datos.salida && datos.salida <= datos.entrada) throw solicitudInvalida("La salida debe ser posterior a la entrada.");
     if (datos.entrada > new Date()) throw solicitudInvalida("La entrada no puede estar en el futuro.");
@@ -454,6 +571,7 @@ export class ServicioMarcaciones {
       await exigirPeriodoAbierto(tx, fechaLocal(datos.entrada));
       await tx.execute(sql`select pg_advisory_xact_lock(${e.id})`);
       await this.validarSolape(tx, e.id, datos.entrada, datos.salida);
+      const destino = await this.validarDestino(tx, datos.sucursalId === undefined ? e.sucursalId : datos.sucursalId, datos.horarioId ?? null);
       const [m] = await tx
         .insert(marcaciones)
         .values({
@@ -463,6 +581,7 @@ export class ServicioMarcaciones {
           estado: datos.salida ? "CERRADA" : "ABIERTA",
           origen: "MANUAL",
           observacion: datos.observacion ?? null,
+          ...destino,
           creadoPor: usuarioId,
         })
         .returning();
@@ -475,7 +594,7 @@ export class ServicioMarcaciones {
   async editar(
     usuarioId: number,
     id: number,
-    cambios: { entrada?: Date; salida?: Date | null; observacion?: string | null; motivo: string },
+    cambios: { entrada?: Date; salida?: Date | null; observacion?: string | null; sucursalId?: number | null; horarioId?: number | null; motivo: string },
   ) {
     return this.db.transaction(async (tx) => {
       const [m] = await tx.select().from(marcaciones).where(eq(marcaciones.id, id));
@@ -489,10 +608,18 @@ export class ServicioMarcaciones {
       if (salida && salida <= entrada) throw solicitudInvalida("La salida debe ser posterior a la entrada.");
       if (salida && salida > new Date(Date.now() + 60_000)) throw solicitudInvalida("La salida no puede estar en el futuro.");
       const observacion = cambios.observacion === undefined ? m.observacion : cambios.observacion;
+      const destino = await this.validarDestino(
+        tx,
+        cambios.sucursalId === undefined ? m.sucursalId : cambios.sucursalId,
+        cambios.horarioId === undefined ? m.horarioId : cambios.horarioId,
+      );
+      const cambiaTurno = destino.horarioId !== m.horarioId;
       const sinCambios =
         entrada.getTime() === m.entrada.getTime() &&
         (salida?.getTime() ?? null) === (m.salida?.getTime() ?? null) &&
-        (observacion ?? null) === (m.observacion ?? null);
+        (observacion ?? null) === (m.observacion ?? null) &&
+        destino.sucursalId === m.sucursalId &&
+        !cambiaTurno;
       if (sinCambios) throw solicitudInvalida("No hay cambios que guardar.");
       await this.validarSolape(tx, m.empleadoId, entrada, salida, m.id);
 
@@ -506,7 +633,8 @@ export class ServicioMarcaciones {
         estado = otraAbierta ? "REVISION" : "ABIERTA";
       }
 
-      const cambianHoras = entrada.getTime() !== m.entrada.getTime() || (salida?.getTime() ?? null) !== (m.salida?.getTime() ?? null);
+      // Cambiar el turno cambia la jornada del día: también invalida la aprobación de extras.
+      const cambianHoras = entrada.getTime() !== m.entrada.getTime() || (salida?.getTime() ?? null) !== (m.salida?.getTime() ?? null) || cambiaTurno;
       const [actual] = await tx
         .update(marcaciones)
         .set({
@@ -514,6 +642,7 @@ export class ServicioMarcaciones {
           salida,
           estado,
           // Si cambian las horas, una aprobación previa de extras deja de ser válida.
+          ...destino,
           ...(cambianHoras ? { estadoExtras: null, minutosExtraAprobados: null, extrasRevisadasPor: null, extrasRevisadasEn: null, salidaAutomatica: false } : {}),
           observacion,
         })
@@ -558,7 +687,7 @@ export class ServicioMarcaciones {
         if (!m) return; // otra petición la cerró entretanto
         await tx.execute(sql`select pg_advisory_xact_lock(${m.empleadoId})`);
         const [e] = await tx.select().from(empleados).where(eq(empleados.id, m.empleadoId));
-        const programada = salidaProgramada(await this.horarioDe(tx, e!, fechaLocal(m.entrada)), m.entrada);
+        const programada = salidaProgramada(await this.horarioDe(tx, e!, fechaLocal(m.entrada), m.horarioId), m.entrada);
         await this.cerrarOlvidada(tx, m, programada, `Sin salida registrada en ${this.env.MAX_HORAS_TURNO} h`);
         if (programada) r.cerradas++;
         else r.aRevision++;

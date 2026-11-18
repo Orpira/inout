@@ -21,6 +21,7 @@ const Horarios = lazy(() => import("./paginas/Horarios"));
 const Liquidacion = lazy(() => import("./paginas/Liquidacion"));
 const Configuracion = lazy(() => import("./paginas/Configuracion"));
 const Usuarios = lazy(() => import("./paginas/Usuarios"));
+const Empresa = lazy(() => import("./paginas/Empresa"));
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -53,6 +54,7 @@ createRoot(document.getElementById("root")!).render(
                         <Route path="liquidacion" element={<Liquidacion />} />
                         <Route path="configuracion" element={<Configuracion />} />
                         <Route path="usuarios" element={<Usuarios />} />
+                        <Route path="empresa" element={<Empresa />} />
                         <Route path="*" element={<p className="text-tinta-suave">Esta página no existe.</p>} />
                       </Route>
                     </Routes>

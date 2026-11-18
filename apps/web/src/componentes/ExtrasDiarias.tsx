@@ -11,13 +11,14 @@ const dia = (f: string) => fmtDia.format(new Date(`${f}T12:00:00-05:00`));
 const h = (min: number) => (min / 60).toFixed(2);
 
 /** Detalle por día de las horas extra de cada empleado, con exportación a Excel. */
-export function ExtrasDiarias({ desde, hasta, empleadoId }: { desde: string; hasta: string; empleadoId: number | null }) {
-  const consulta = `/reportes/extras-diarias?desde=${desde}&hasta=${hasta}${empleadoId ? `&empleadoId=${empleadoId}` : ""}`;
-  const q = useQuery({ queryKey: ["extras-diarias", desde, hasta, empleadoId], queryFn: () => api<ReporteExtrasDiarias>(consulta) });
+export function ExtrasDiarias({ desde, hasta, empleadoId, sucursalId = null }: { desde: string; hasta: string; empleadoId: number | null; sucursalId?: number | null }) {
+  const consulta = `/reportes/extras-diarias?desde=${desde}&hasta=${hasta}${empleadoId ? `&empleadoId=${empleadoId}` : ""}${sucursalId ? `&sucursalId=${sucursalId}` : ""}`;
+  const q = useQuery({ queryKey: ["extras-diarias", desde, hasta, empleadoId, sucursalId], queryFn: () => api<ReporteExtrasDiarias>(consulta) });
 
   if (q.isPending) return <Cargando />;
   if (q.error) return <MensajeError error={q.error} />;
   const { datos, totales } = q.data;
+  const conCentro = datos.some((f) => f.centro);
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -44,6 +45,7 @@ export function ExtrasDiarias({ desde, hasta, empleadoId }: { desde: string; has
                 <th className="num">Ext. nocturnas</th>
                 <th className="num">Ext. festivos</th>
                 <th className="num">Por aprobar</th>
+                {conCentro && <th>Centro de costo</th>}
               </tr>
             </thead>
             <tbody>
@@ -73,6 +75,7 @@ export function ExtrasDiarias({ desde, hasta, empleadoId }: { desde: string; has
                       <span className="text-tinta-tenue">·</span>
                     )}
                   </td>
+                  {conCentro && <td className="whitespace-nowrap text-tinta-suave">{f.centro ?? "—"}</td>}
                 </tr>
               ))}
             </tbody>
@@ -83,6 +86,7 @@ export function ExtrasDiarias({ desde, hasta, empleadoId }: { desde: string; has
                 <td className="num border-t border-linea-fuerte">{h(totales.minNocturnas)}</td>
                 <td className="num border-t border-linea-fuerte">{h(totales.minFestivas)}</td>
                 <td className="num border-t border-linea-fuerte text-extra-oscuro">{totales.minPendientes ? h(totales.minPendientes) : ""}</td>
+                {conCentro && <td className="border-t border-linea-fuerte" />}
               </tr>
             </tfoot>
           </table>

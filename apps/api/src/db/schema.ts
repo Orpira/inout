@@ -4,6 +4,7 @@ import {
   boolean,
   check,
   date,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -74,6 +75,8 @@ export const horarios = pgTable("horarios", {
   descanso: jsonb("descanso").$type<Descanso | null>(),
   toleranciaMinutos: integer("tolerancia_minutos").notNull().default(0),
   requiereAprobacion: boolean("requiere_aprobacion").notNull().default(false),
+  /** Sucursal donde se trabaja este turno. NULL = sirve en cualquier sucursal. */
+  sucursalId: integer("sucursal_id").references(() => sucursales.id, { onDelete: "restrict" }),
   activo: boolean("activo").notNull().default(true),
   ...tiempos,
 });
@@ -91,6 +94,8 @@ export const empleados = pgTable(
     salario: numeric("salario", { precision: 14, scale: 2, mode: "number" }).notNull().default(0),
     /** Horario asignado. NULL = jornada legal en 6 días (lunes a sábado). */
     horarioId: integer("horario_id").references(() => horarios.id, { onDelete: "restrict" }),
+    /** Sucursal (centro de costo) base. Puede cubrir turnos en otras. */
+    sucursalId: integer("sucursal_id").references(() => sucursales.id, { onDelete: "restrict" }),
     fechaIngreso: date("fecha_ingreso"),
     activo: boolean("activo").notNull().default(true),
     ...tiempos,
@@ -115,6 +120,16 @@ export const marcaciones = pgTable(
     observacion: text("observacion"),
     /** La salida la puso el sistema con la hora del horario porque el empleado no la marcó. */
     salidaAutomatica: boolean("salida_automatica").notNull().default(false),
+    /** Sucursal (centro de costo) donde se trabajó: a ella se imputan las horas en la liquidación. */
+    sucursalId: integer("sucursal_id").references(() => sucursales.id, { onDelete: "restrict" }),
+    /** Turno elegido al cubrir otra sucursal. NULL = el horario asignado al empleado. Rige la jornada de ese día. */
+    horarioId: integer("horario_id").references(() => horarios.id, { onDelete: "restrict" }),
+    /** Ubicación del kiosko al marcar la entrada (si el dispositivo la dio), solo para verificación. */
+    latitud: doublePrecision("latitud"),
+    longitud: doublePrecision("longitud"),
+    precisionMetros: integer("precision_metros"),
+    /** Distancia a la sede de la sucursal; se avisa si supera el radio configurado. */
+    distanciaSedeMetros: integer("distancia_sede_metros"),
     minutosTotales: integer("minutos_totales"),
     /** Extras liquidadas (reconocidas). */
     minutosExtra: integer("minutos_extra"),
@@ -136,6 +151,7 @@ export const marcaciones = pgTable(
     index("marcaciones_entrada_idx").on(t.entrada),
     index("marcaciones_estado_idx").on(t.estado),
     index("marcaciones_estado_extras_idx").on(t.estadoExtras),
+    index("marcaciones_sucursal_idx").on(t.sucursalId),
     // Un empleado solo puede tener una marcación abierta a la vez.
     uniqueIndex("marcaciones_una_abierta_uq")
       .on(t.empleadoId)
@@ -266,3 +282,40 @@ export type PeriodoLiquidado = typeof periodosLiquidados.$inferSelect;
 export type Empleado = typeof empleados.$inferSelect;
 export type Marcacion = typeof marcaciones.$inferSelect;
 export type HorarioFila = typeof horarios.$inferSelect;
+
+/** Datos de la empresa (un único registro, id = 1). Encabezan reportes y exportaciones. */
+export const empresa = pgTable(
+  "empresa",
+  {
+    id: integer("id").primaryKey().default(1),
+    nombre: text("nombre").notNull(),
+    nit: text("nit"),
+    actualizadoEn: timestamp("actualizado_en", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [check("empresa_unica", sql`${t.id} = 1`)],
+);
+
+/** Sucursales o centros de costo. No se borran: se desactivan, porque las marcaciones las referenciarán. */
+export const sucursales = pgTable(
+  "sucursales",
+  {
+    id: serial("id").primaryKey(),
+    /** Código del centro de costo en nómina/contabilidad. */
+    codigo: text("codigo").notNull(),
+    nombre: text("nombre").notNull(),
+    ciudad: text("ciudad"),
+    direccion: text("direccion"),
+    /** Ubicación de la sede: sirve para proponer la sucursal al autorizar un kiosko y para verificar dónde se marca. */
+    latitud: doublePrecision("latitud"),
+    longitud: doublePrecision("longitud"),
+    radioMetros: integer("radio_metros").notNull().default(300),
+    activa: boolean("activa").notNull().default(true),
+    creadoEn: timestamp("creado_en", { withTimezone: true }).notNull().defaultNow(),
+    actualizadoEn: timestamp("actualizado_en", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("sucursales_codigo_uq").on(sql`lower(${t.codigo})`),
+    uniqueIndex("sucursales_nombre_uq").on(sql`lower(${t.nombre})`),
+    check("sucursales_coordenadas", sql`(${t.latitud} is null) = (${t.longitud} is null)`),
+  ],
+);
